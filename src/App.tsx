@@ -1,12 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BookOpen, Brain, CheckCircle2, Download, FileJson, Languages, Plus, Save, Settings, Sparkles, Trash2 } from 'lucide-react';
+import { BookOpen, Brain, CheckCircle2, Clipboard, Download, FileJson, Languages, Plus, Save, Settings, Sparkles, Trash2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { api, downloadExport } from './api';
+import { api } from './api';
 import type { AppSettings, CardProject, CharacterBook, CharacterCardV2, LorebookEntry } from './types';
 import i18n from './i18n';
 
-const templates = ['brainstorm', 'generate_card', 'generate_lorebook', 'compress', 'review', 'translate', 'mvu'];
+const brainstormTemplates = ['brainstorm', 'generate_card', 'generate_lorebook'];
+const reviewTemplates = ['review', 'translate', 'compress', 'mvu'];
+const templateLabels: Record<string, string> = {
+  brainstorm: 'templateBrainstorm',
+  generate_card: 'templateGenerateCard',
+  generate_lorebook: 'templateGenerateLorebook',
+  review: 'templateReview',
+  translate: 'templateTranslate',
+  compress: 'templateCompress',
+  mvu: 'templateMvu',
+};
 
 export function App() {
   const { t } = useTranslation();
@@ -17,6 +27,7 @@ export function App() {
   const [llmInput, setLlmInput] = useState('');
   const [llmTemplate, setLlmTemplate] = useState('brainstorm');
   const [conversationId, setConversationId] = useState('default');
+  const [exportStatus, setExportStatus] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
 
   const projectsQuery = useQuery({ queryKey: ['projects'], queryFn: api.listProjects });
@@ -39,6 +50,11 @@ export function App() {
       i18n.changeLanguage(settingsQuery.data.uiLocale);
     }
   }, [settingsQuery.data?.uiLocale]);
+
+  useEffect(() => {
+    if (tab === 'brainstorm' && !brainstormTemplates.includes(llmTemplate)) setLlmTemplate('brainstorm');
+    if (tab === 'review' && !reviewTemplates.includes(llmTemplate)) setLlmTemplate('review');
+  }, [llmTemplate, tab]);
 
   const createProject = useMutation({
     mutationFn: () => api.createProject('Untitled card'),
@@ -108,6 +124,32 @@ export function App() {
     return Boolean(draft && saved && JSON.stringify(draft) !== JSON.stringify(saved));
   }, [draft, projectsQuery.data]);
 
+  const exportCard = async (mode: 'download' | 'copy') => {
+    if (!draft) return;
+    try {
+      const card = buildExportCard(draft);
+      const json = JSON.stringify(card, null, 2);
+      const filename = `${safeFilename(draft.card.data.name || draft.title)}.json`;
+      if (mode === 'copy') {
+        await navigator.clipboard.writeText(json);
+        setExportStatus(t('exportCopied'));
+        return;
+      }
+      const blob = new Blob([json], { type: 'application/json' });
+      const href = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = href;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(href);
+      setExportStatus(t('exportDownloaded', { filename }));
+    } catch (error) {
+      setExportStatus(t('exportFailed', { message: error instanceof Error ? error.message : String(error) }));
+    }
+  };
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -161,17 +203,18 @@ export function App() {
                 onChange={(event) => updateDraft((project) => (project.title = event.target.value))}
               />
               <div className="topbar-actions">
-                <button onClick={() => setTab('settings')} aria-label={t('settings')}>
-                  <Settings size={16} /> {t('settings')}
-                </button>
                 <button onClick={() => saveProject.mutate(draft)} disabled={!isDirty}>
                   <Save size={16} /> {t('save')}
                 </button>
-                <button onClick={() => downloadExport(draft.id, draft.card.data.name || draft.title)}>
+                <button onClick={() => exportCard('download')}>
                   <Download size={16} /> {t('exportJson')}
+                </button>
+                <button onClick={() => exportCard('copy')}>
+                  <Clipboard size={16} /> {t('copyJson')}
                 </button>
               </div>
             </header>
+            {exportStatus && <div className="export-status">{exportStatus}</div>}
 
             <nav className="tabs">
               <Tab id="brainstorm" label={t('brainstorm')} icon={<Brain size={16} />} active={tab} onClick={setTab} />
@@ -195,6 +238,7 @@ export function App() {
                 commitDraft={commitDraft}
                 conversationId={conversationId}
                 setConversationId={setConversationId}
+                templates={brainstormTemplates}
               />
             )}
             {tab === 'card' && <CardEditor project={draft} updateDraft={updateDraft} />}
@@ -213,6 +257,7 @@ export function App() {
                 commitDraft={commitDraft}
                 conversationId={conversationId}
                 setConversationId={setConversationId}
+                templates={reviewTemplates}
               />
             )}
             {tab === 'settings' && settingsDraft && (
@@ -223,6 +268,21 @@ export function App() {
       </main>
     </div>
   );
+}
+
+function buildExportCard(project: CardProject): CharacterCardV2 {
+  const card = structuredClone(project.card);
+  card.spec = 'chara_card_v2';
+  card.spec_version = card.spec_version || '2.0';
+  if (project.settings.embedLorebook) {
+    card.data.character_book = {
+      ...structuredClone(project.lorebook),
+      token_budget: project.settings.lorebookBudget,
+    };
+  } else {
+    delete card.data.character_book;
+  }
+  return card;
 }
 
 function Tab(props: { id: string; label: string; icon: JSX.Element; active: string; onClick: (id: string) => void }) {
@@ -266,14 +326,44 @@ function CardEditor({ project, updateDraft }: { project: CardProject; updateDraf
         <TextField label="creator_notes" value={data.creator_notes} rows={6} onChange={(value) => setData('creator_notes', value)} />
         <TextField label="system_prompt" value={data.system_prompt} rows={6} onChange={(value) => setData('system_prompt', value)} />
         <TextField label="post_history_instructions" value={data.post_history_instructions} rows={6} onChange={(value) => setData('post_history_instructions', value)} />
-        <TextField
-          label="alternate_greetings"
-          value={data.alternate_greetings.join('\n---\n')}
-          rows={7}
-          onChange={(value) => setData('alternate_greetings', value.split(/\n---\n/g).map((item) => item.trim()).filter(Boolean))}
+        <AlternativeGreetingsEditor
+          greetings={data.alternate_greetings ?? []}
+          onChange={(value) => setData('alternate_greetings', value)}
         />
         <TextField label="data.extensions JSON" value={JSON.stringify(data.extensions ?? {}, null, 2)} rows={7} onChange={(value) => setData('extensions', parseJSON(value))} />
       </div>
+    </section>
+  );
+}
+
+function AlternativeGreetingsEditor({ greetings, onChange }: { greetings: string[]; onChange: (value: string[]) => void }) {
+  const { t } = useTranslation();
+  const update = (index: number, value: string) => {
+    const next = [...greetings];
+    next[index] = value;
+    onChange(next);
+  };
+  const remove = (index: number) => onChange(greetings.filter((_, itemIndex) => itemIndex !== index));
+  return (
+    <section className="alt-greetings">
+      <div className="alt-head">
+        <span>alternate_greetings</span>
+        <button onClick={() => onChange([...greetings, ''])}>
+          <Plus size={16} /> {t('addGreeting')}
+        </button>
+      </div>
+      {greetings.length === 0 && <p>{t('noGreetings')}</p>}
+      {greetings.map((greeting, index) => (
+        <article className="alt-greeting" key={index}>
+          <div>
+            <strong>{t('greeting')} {index + 1}</strong>
+            <button className="danger" onClick={() => remove(index)}>
+              <Trash2 size={15} /> {t('deleteEntry')}
+            </button>
+          </div>
+          <textarea rows={6} value={greeting} onChange={(event) => update(index, event.target.value)} />
+        </article>
+      ))}
     </section>
   );
 }
@@ -444,6 +534,7 @@ function LLMPanel(props: {
   commitDraft: (updater: (project: CardProject) => void) => void;
   conversationId: string;
   setConversationId: (value: string) => void;
+  templates: string[];
 }) {
   const { t } = useTranslation();
   const conversations = conversationOptions(props.project.llmHistory, props.conversationId);
@@ -474,9 +565,9 @@ function LLMPanel(props: {
           </button>
         </div>
         <label className="field">
-          <span>template</span>
+          <span>{t('task')}</span>
           <select value={props.template} onChange={(event) => props.setTemplate(event.target.value)}>
-            {templates.map((template) => <option value={template} key={template}>{template}</option>)}
+            {props.templates.map((template) => <option value={template} key={template}>{t(templateLabels[template])}</option>)}
           </select>
         </label>
         <TextField label={t('input')} value={props.input} rows={10} onChange={props.setInput} />
@@ -574,6 +665,10 @@ function conversationLabel(id: string) {
   const timestamp = Number(compact);
   if (Number.isFinite(timestamp)) return new Date(timestamp).toLocaleString();
   return compact || 'default';
+}
+
+function safeFilename(value: string) {
+  return (value || 'character-card').replace(/[\\/:*?"<>|]+/g, '_').trim() || 'character-card';
 }
 
 function SettingsPanel({ settings, save }: { settings: AppSettings; save: (settings: AppSettings) => void }) {

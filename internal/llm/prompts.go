@@ -2,6 +2,7 @@ package llm
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"st-card-writer/internal/model"
@@ -28,6 +29,7 @@ func BuildPrompt(req TemplateRequest) string {
 	parts := []string{
 		"Respond in this locale: " + locale + ". For zh-TW, use natural Traditional Chinese.",
 		cardWritingRules(),
+		formatTokenBudget(req.Project),
 		selected,
 		formatPriorMessages(req.PriorMessages),
 		"\nCurrent card data:\n" + string(card),
@@ -37,6 +39,20 @@ func BuildPrompt(req TemplateRequest) string {
 		parts = append(parts, "\nUser request:\n"+req.Input)
 	}
 	return strings.Join(parts, "\n\n")
+}
+
+func formatTokenBudget(project model.Project) string {
+	budget := model.CountBudget(project)
+	return fmt.Sprintf(
+		"TOKEN BUDGET CONTEXT:\n- permanent tokens now: %d / %d\n- dynamic tokens now: %d / %d\n- lorebook tokens now: %d / %d\n- total estimated tokens now: %d\nUse the available budget intentionally. Do not be overly terse when there is room, but keep permanent fields focused and playable.",
+		budget.Permanent,
+		budget.PermanentBudget,
+		budget.Dynamic,
+		budget.DynamicBudget,
+		budget.Lorebook,
+		budget.LorebookBudget,
+		budget.Total,
+	)
 }
 
 func formatPriorMessages(messages []model.LLMMessage) string {
@@ -118,6 +134,7 @@ func cardWritingRules() string {
 		"CARD QUALITY RULES:",
 		"- Prefer multi-turn concept development: gather information, confirm understanding, then generate only on manual request.",
 		"- Permanent fields should be concise. Target roughly 600-1000 permanent tokens total: description 60-70%, personality 10-15%, scenario 15-25%.",
+		"- The 600-1000 permanent token target is a quality range, not a hard ceiling. If the user budget is larger, use the extra room for clearer motivations, relationships, behavioral rules, and scenario hooks instead of padding.",
 		"- description should include physical details, core traits, formative background, motivations/goals, and minimal world context. Use lorebooks for heavy worldbuilding.",
 		"- In meta-instruction fields, use {{char}} and {{user}}. Avoid pronouns for {{char}} in instructional prose when clarity matters.",
 		"- personality should be compact: comma list, short sentences, or a clear psychological framework.",

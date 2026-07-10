@@ -152,6 +152,16 @@ button:disabled {
   flex-wrap: wrap;
 }
 
+.export-status {
+  border: 1px solid #b9d2c7;
+  background: #eef7f2;
+  color: #215b4b;
+  border-radius: 7px;
+  padding: 9px 11px;
+  margin: -4px 0 14px;
+  font-size: 13px;
+}
+
 .tabs {
   display: flex;
   gap: 8px;
@@ -207,6 +217,58 @@ button:disabled {
 }
 
 .field textarea {
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.alt-greetings {
+  display: grid;
+  gap: 10px;
+}
+
+.alt-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.alt-head span {
+  color: #4e5c56;
+  font-size: 12px;
+  font-weight: 680;
+}
+
+.alt-greetings p {
+  margin: 0;
+  color: #64716b;
+  font-size: 13px;
+}
+
+.alt-greeting {
+  border: 1px solid #d8ded5;
+  background: #fff;
+  border-radius: 8px;
+  padding: 12px;
+  display: grid;
+  gap: 9px;
+}
+
+.alt-greeting div {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.alt-greeting textarea {
+  border: 1px solid #cbd2c9;
+  background: #fff;
+  color: #18201f;
+  border-radius: 7px;
+  padding: 10px 11px;
+  width: 100%;
   resize: vertical;
   line-height: 1.5;
 }
