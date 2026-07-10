@@ -201,13 +201,9 @@ func (s *Server) importCard(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err, http.StatusBadRequest)
 		return
 	}
-	var card model.Card
-	if err := json.Unmarshal(body.Card, &card); err != nil {
+	card, err := normalizeImportedCard(body.Card)
+	if err != nil {
 		writeError(w, err, http.StatusBadRequest)
-		return
-	}
-	if card.Spec != "chara_card_v2" {
-		writeError(w, errors.New("only chara_card_v2 JSON is supported in this import endpoint"), http.StatusBadRequest)
 		return
 	}
 	title := body.Title
@@ -225,6 +221,117 @@ func (s *Server) importCard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, project)
+}
+
+func normalizeImportedCard(raw json.RawMessage) (model.Card, error) {
+	var card model.Card
+	if err := json.Unmarshal(raw, &card); err != nil {
+		return model.Card{}, err
+	}
+	if strings.HasPrefix(card.Spec, "chara_card_v") && card.Data.Name != "" {
+		return normalizeCardForProject(card), nil
+	}
+
+	var legacy legacyCard
+	if err := json.Unmarshal(raw, &legacy); err != nil {
+		return model.Card{}, err
+	}
+	if legacy.Name == "" {
+		return model.Card{}, errors.New("unsupported character card JSON: expected chara_card_v2, chara_card_v3, or legacy SillyTavern fields")
+	}
+	card = model.Card{
+		Spec:        "chara_card_v2",
+		SpecVersion: "2.0",
+		Data: model.CardData{
+			Name:                    legacy.Name,
+			Description:             legacy.Description,
+			Personality:             legacy.Personality,
+			Scenario:                legacy.Scenario,
+			FirstMes:                legacy.FirstMes,
+			MesExample:              legacy.MesExample,
+			CreatorNotes:            firstNonEmpty(legacy.CreatorNotes, legacy.CreatorComment),
+			SystemPrompt:            legacy.SystemPrompt,
+			PostHistoryInstructions: legacy.PostHistoryInstructions,
+			AlternateGreetings:      legacy.AlternateGreetings,
+			Tags:                    legacy.Tags,
+			Creator:                 legacy.Creator,
+			CharacterVersion:        legacy.CharacterVersion,
+			CharacterBook:           legacy.CharacterBook,
+			Extensions:              legacy.Extensions,
+		},
+		Extensions: map[string]any{},
+	}
+	return normalizeCardForProject(card), nil
+}
+
+type legacyCard struct {
+	Name                    string               `json:"name"`
+	Description             string               `json:"description"`
+	Personality             string               `json:"personality"`
+	Scenario                string               `json:"scenario"`
+	FirstMes                string               `json:"first_mes"`
+	MesExample              string               `json:"mes_example"`
+	CreatorNotes            string               `json:"creator_notes"`
+	CreatorComment          string               `json:"creatorcomment"`
+	SystemPrompt            string               `json:"system_prompt"`
+	PostHistoryInstructions string               `json:"post_history_instructions"`
+	AlternateGreetings      []string             `json:"alternate_greetings"`
+	Tags                    []string             `json:"tags"`
+	Creator                 string               `json:"creator"`
+	CharacterVersion        string               `json:"character_version"`
+	CharacterBook           *model.CharacterBook `json:"character_book"`
+	Extensions              map[string]any       `json:"extensions"`
+}
+
+func normalizeCardForProject(card model.Card) model.Card {
+	card.Spec = "chara_card_v2"
+	card.SpecVersion = "2.0"
+	if card.Extensions == nil {
+		card.Extensions = map[string]any{}
+	}
+	if card.Data.AlternateGreetings == nil {
+		card.Data.AlternateGreetings = []string{}
+	}
+	if card.Data.Tags == nil {
+		card.Data.Tags = []string{}
+	}
+	if card.Data.Extensions == nil {
+		card.Data.Extensions = map[string]any{}
+	}
+	if card.Data.CharacterBook != nil {
+		normalizeCharacterBook(card.Data.CharacterBook)
+	}
+	return card
+}
+
+func normalizeCharacterBook(book *model.CharacterBook) {
+	if book.Entries == nil {
+		book.Entries = []model.LorebookEntry{}
+	}
+	if book.Extensions == nil {
+		book.Extensions = map[string]any{}
+	}
+	for index := range book.Entries {
+		entry := &book.Entries[index]
+		if entry.Keys == nil {
+			entry.Keys = []string{}
+		}
+		if entry.SecondaryKeys == nil {
+			entry.SecondaryKeys = []string{}
+		}
+		if entry.Extensions == nil {
+			entry.Extensions = map[string]any{}
+		}
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func (s *Server) llm(w http.ResponseWriter, r *http.Request) {
