@@ -3,7 +3,11 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -256,11 +260,17 @@ func (s *Server) llm(w http.ResponseWriter, r *http.Request) {
 		PriorMessages:  priorMessages,
 		ConversationID: conversationID,
 	})
+	log.Printf("llm request project=%s conversation=%s template=%s model=%s prompt_chars=%d input_chars=%d", project.ID, conversationID, body.Template, settings.DeepSeekModel, len(prompt), len(body.Input))
+	appendLLMLog("request", project.ID, conversationID, body.Template, settings.DeepSeekModel, body.Input, prompt, "")
 	response, err := llm.DeepSeekClient{APIKey: settings.DeepSeekAPIKey, Model: settings.DeepSeekModel}.Complete(prompt)
 	if err != nil {
+		log.Printf("llm error project=%s conversation=%s template=%s error=%v", project.ID, conversationID, body.Template, err)
+		appendLLMLog("error", project.ID, conversationID, body.Template, settings.DeepSeekModel, body.Input, prompt, err.Error())
 		writeError(w, err, http.StatusBadGateway)
 		return
 	}
+	log.Printf("llm response project=%s conversation=%s template=%s response_chars=%d", project.ID, conversationID, body.Template, len(response))
+	appendLLMLog("response", project.ID, conversationID, body.Template, settings.DeepSeekModel, body.Input, prompt, response)
 	message := model.LLMMessage{
 		ID:             "msg_" + time.Now().UTC().Format("20060102150405.000000000"),
 		ConversationID: conversationID,
@@ -274,6 +284,36 @@ func (s *Server) llm(w http.ResponseWriter, r *http.Request) {
 	project.LLMHistory = append([]model.LLMMessage{message}, project.LLMHistory...)
 	_ = s.store.SaveProject(project)
 	writeJSON(w, message)
+}
+
+func appendLLMLog(kind string, projectID string, conversationID string, template string, modelName string, input string, prompt string, output string) {
+	if err := os.MkdirAll("data", 0755); err != nil {
+		log.Printf("llm log mkdir failed: %v", err)
+		return
+	}
+	file, err := os.OpenFile(filepath.Join("data", "llm-interactions.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	if err != nil {
+		log.Printf("llm log open failed: %v", err)
+		return
+	}
+	defer file.Close()
+
+	_, err = fmt.Fprintf(
+		file,
+		"\n===== %s %s =====\nproject=%s conversation=%s template=%s model=%s\n--- user input ---\n%s\n--- prompt ---\n%s\n--- output ---\n%s\n",
+		time.Now().Format(time.RFC3339),
+		kind,
+		projectID,
+		conversationID,
+		template,
+		modelName,
+		input,
+		prompt,
+		output,
+	)
+	if err != nil {
+		log.Printf("llm log write failed: %v", err)
+	}
 }
 
 func conversationMessages(history []model.LLMMessage, conversationID string) []model.LLMMessage {

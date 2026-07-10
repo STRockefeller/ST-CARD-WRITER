@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BookOpen, Brain, CheckCircle2, Clipboard, Download, FileJson, Languages, Plus, Save, Settings, Sparkles, Trash2 } from 'lucide-react';
+import { BookOpen, Brain, CheckCircle2, Clipboard, Download, FileJson, Languages, PanelLeftClose, PanelLeftOpen, Plus, Save, Settings, Sparkles, Trash2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { api } from './api';
 import type { AppSettings, CardProject, CharacterBook, CharacterCardV2, LorebookEntry } from './types';
@@ -34,6 +34,9 @@ export function App() {
   const [conversationId, setConversationId] = useState('default');
   const [exportStatus, setExportStatus] = useState('');
   const [fieldTarget, setFieldTarget] = useState<FieldTarget | null>(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [appError, setAppError] = useState('');
+  const [dismissedQueryError, setDismissedQueryError] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
 
   const projectsQuery = useQuery({ queryKey: ['projects'], queryFn: api.listProjects });
@@ -62,27 +65,43 @@ export function App() {
     if (tab === 'review' && !reviewTemplates.includes(llmTemplate)) setLlmTemplate('review');
   }, [llmTemplate, tab]);
 
+  useEffect(() => {
+    setDismissedQueryError('');
+  }, [projectsQuery.error, settingsQuery.error]);
+
   const createProject = useMutation({
     mutationFn: () => api.createProject('Untitled card'),
     onSuccess(project) {
+      setAppError('');
       queryClient.invalidateQueries({ queryKey: ['projects'] });
       setActiveId(project.id);
+    },
+    onError(error) {
+      setAppError(getErrorMessage(error));
     },
   });
 
   const saveProject = useMutation({
     mutationFn: (project: CardProject) => api.saveProject(project),
     onSuccess(project) {
+      setAppError('');
       queryClient.invalidateQueries({ queryKey: ['projects'] });
       queryClient.invalidateQueries({ queryKey: ['tokens', project.id] });
+    },
+    onError(error) {
+      setAppError(getErrorMessage(error));
     },
   });
 
   const saveSettings = useMutation({
     mutationFn: (settings: AppSettings) => api.saveSettings(settings),
     onSuccess(settings) {
+      setAppError('');
       queryClient.setQueryData(['settings'], settings);
       i18n.changeLanguage(settings.uiLocale);
+    },
+    onError(error) {
+      setAppError(getErrorMessage(error));
     },
   });
 
@@ -92,8 +111,12 @@ export function App() {
       return api.importCard(parsed?.data?.name ?? file.name.replace(/\.json$/i, ''), parsed);
     },
     onSuccess(project) {
+      setAppError('');
       queryClient.invalidateQueries({ queryKey: ['projects'] });
       setActiveId(project.id);
+    },
+    onError(error) {
+      setAppError(getErrorMessage(error));
     },
   });
 
@@ -101,7 +124,11 @@ export function App() {
     mutationFn: () =>
       api.runLLM(draft!.id, conversationId, llmTemplate, settingsQuery.data?.promptLocale ?? 'zh-TW', llmInput),
     onSuccess() {
+      setAppError('');
       queryClient.invalidateQueries({ queryKey: ['projects'] });
+    },
+    onError(error) {
+      setAppError(getErrorMessage(error));
     },
   });
 
@@ -165,8 +192,12 @@ export function App() {
     setLlmInput(buildFieldAIPrompt(target.label, currentValue, mode));
   };
 
+  const queryError = projectsQuery.error ?? settingsQuery.error;
+  const queryErrorMessage = getErrorMessage(queryError);
+  const visibleError = appError || (queryErrorMessage !== dismissedQueryError ? queryErrorMessage : '');
+
   return (
-    <div className="app-shell">
+    <div className={sidebarCollapsed ? 'app-shell sidebar-collapsed' : 'app-shell'}>
       <aside className="sidebar">
         <div className="brand">
           <BookOpen size={24} />
@@ -218,6 +249,10 @@ export function App() {
                 onChange={(event) => updateDraft((project) => (project.title = event.target.value))}
               />
               <div className="topbar-actions">
+                <button onClick={() => setSidebarCollapsed((value) => !value)}>
+                  {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+                  {sidebarCollapsed ? t('showProjects') : t('hideProjects')}
+                </button>
                 <button onClick={() => saveProject.mutate(draft)} disabled={!isDirty}>
                   <Save size={16} /> {t('save')}
                 </button>
@@ -230,6 +265,15 @@ export function App() {
               </div>
             </header>
             {exportStatus && <div className="export-status">{exportStatus}</div>}
+            {visibleError && (
+              <ErrorBanner
+                message={visibleError}
+                onDismiss={() => {
+                  setAppError('');
+                  if (queryErrorMessage) setDismissedQueryError(queryErrorMessage);
+                }}
+              />
+            )}
 
             <nav className="tabs">
               <Tab id="brainstorm" label={t('brainstorm')} icon={<Brain size={16} />} active={tab} onClick={setTab} />
@@ -310,6 +354,19 @@ function Tab(props: { id: string; label: string; icon: JSX.Element; active: stri
       {props.icon}
       {props.label}
     </button>
+  );
+}
+
+function ErrorBanner({ message, onDismiss }: { message: string; onDismiss: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <div className="error-banner">
+      <div>
+        <strong>{t('backendError')}</strong>
+        <span>{message}</span>
+      </div>
+      <button onClick={onDismiss}>{t('dismiss')}</button>
+    </div>
   );
 }
 
@@ -702,7 +759,7 @@ function LLMPanel(props: {
         </div>
         {currentMessages.map((message) => (
           <article className="history-item" key={message.id}>
-            <div><strong>{message.template}</strong><span>{new Date(message.createdAt).toLocaleString()}</span></div>
+            <div className="history-meta"><strong>{message.template}</strong><span>{new Date(message.createdAt).toLocaleString()}</span></div>
             {message.userInput && <blockquote>{message.userInput}</blockquote>}
             <RichResponse text={message.response} onApply={applyCodeBlock} onApplyField={props.fieldTarget ? applyFieldBlock : undefined} fieldLabel={props.fieldTarget?.label} />
           </article>
@@ -761,11 +818,150 @@ function RichResponse({
           <pre>{part.content}</pre>
         </div>
       ) : (
-        <p key={`${part.kind}-${index}`}>{part.content}</p>
+        <MarkdownText content={part.content} key={`${part.kind}-${index}`} />
       ))}
       {status && <small className="response-status">{status}</small>}
     </div>
   );
+}
+
+function MarkdownText({ content }: { content: string }) {
+  const blocks = parseMarkdownBlocks(content);
+  return (
+    <div className="markdown-response">
+      {blocks.map((block, index) => {
+        if (block.kind === 'table') {
+          return (
+            <div className="markdown-table-wrap" key={`table-${index}`}>
+              <table>
+                <thead>
+                  <tr>{block.headers.map((cell, cellIndex) => <th key={cellIndex}>{renderInline(cell)}</th>)}</tr>
+                </thead>
+                <tbody>
+                  {block.rows.map((row, rowIndex) => (
+                    <tr key={rowIndex}>{row.map((cell, cellIndex) => <td key={cellIndex}>{renderInline(cell)}</td>)}</tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          );
+        }
+        if (block.kind === 'heading') return <h3 key={`heading-${index}`}>{renderInline(block.text)}</h3>;
+        if (block.kind === 'rule') return <hr key={`rule-${index}`} />;
+        if (block.kind === 'list') {
+          const items = block.items.map((item, itemIndex) => <li key={itemIndex}>{renderInline(item)}</li>);
+          return block.ordered ? <ol key={`list-${index}`}>{items}</ol> : <ul key={`list-${index}`}>{items}</ul>;
+        }
+        return <p key={`paragraph-${index}`}>{renderInline(block.text)}</p>;
+      })}
+    </div>
+  );
+}
+
+type MarkdownBlock =
+  | { kind: 'paragraph'; text: string }
+  | { kind: 'heading'; text: string }
+  | { kind: 'rule' }
+  | { kind: 'list'; ordered: boolean; items: string[] }
+  | { kind: 'table'; headers: string[]; rows: string[][] };
+
+function parseMarkdownBlocks(content: string): MarkdownBlock[] {
+  const blocks: MarkdownBlock[] = [];
+  const lines = content.replace(/\r\n/g, '\n').split('\n');
+  let index = 0;
+
+  while (index < lines.length) {
+    if (!lines[index].trim()) {
+      index += 1;
+      continue;
+    }
+
+    if (isTableStart(lines, index)) {
+      const headers = splitTableRow(lines[index]);
+      index += 2;
+      const rows: string[][] = [];
+      while (index < lines.length && isTableRow(lines[index])) {
+        rows.push(splitTableRow(lines[index]));
+        index += 1;
+      }
+      blocks.push({ kind: 'table', headers, rows });
+      continue;
+    }
+
+    const heading = lines[index].match(/^\s{0,3}#{1,4}\s+(.+)$/);
+    if (heading) {
+      blocks.push({ kind: 'heading', text: heading[1].trim() });
+      index += 1;
+      continue;
+    }
+
+    if (/^\s*-{3,}\s*$/.test(lines[index])) {
+      blocks.push({ kind: 'rule' });
+      index += 1;
+      continue;
+    }
+
+    const listMatch = lines[index].match(/^\s*(?:[-*+]|\d+\.)\s+(.+)$/);
+    if (listMatch) {
+      const ordered = /^\s*\d+\./.test(lines[index]);
+      const items: string[] = [];
+      while (index < lines.length) {
+        const match = lines[index].match(/^\s*(?:[-*+]|\d+\.)\s+(.+)$/);
+        if (!match) break;
+        items.push(match[1].trim());
+        index += 1;
+      }
+      blocks.push({ kind: 'list', ordered, items });
+      continue;
+    }
+
+    const paragraph: string[] = [];
+    while (
+      index < lines.length &&
+      lines[index].trim() &&
+      !isTableStart(lines, index) &&
+      !/^\s{0,3}#{1,4}\s+/.test(lines[index]) &&
+      !/^\s*-{3,}\s*$/.test(lines[index]) &&
+      !/^\s*(?:[-*+]|\d+\.)\s+/.test(lines[index])
+    ) {
+      paragraph.push(lines[index]);
+      index += 1;
+    }
+    blocks.push({ kind: 'paragraph', text: paragraph.join('\n') });
+  }
+
+  return blocks;
+}
+
+function isTableStart(lines: string[], index: number) {
+  return index + 1 < lines.length && isTableRow(lines[index]) && /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(lines[index + 1]);
+}
+
+function isTableRow(line: string) {
+  return line.includes('|') && splitTableRow(line).length > 1;
+}
+
+function splitTableRow(line: string) {
+  return line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((cell) => cell.trim());
+}
+
+function renderInline(text: string) {
+  const nodes: Array<string | JSX.Element> = [];
+  const regex = /(\*\*[^*]+\*\*|`[^`]+`)/g;
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > cursor) nodes.push(text.slice(cursor, match.index));
+    const token = match[0];
+    if (token.startsWith('**')) {
+      nodes.push(<strong key={`${match.index}-${token}`}>{token.slice(2, -2)}</strong>);
+    } else {
+      nodes.push(<code key={`${match.index}-${token}`}>{token.slice(1, -1)}</code>);
+    }
+    cursor = regex.lastIndex;
+  }
+  if (cursor < text.length) nodes.push(text.slice(cursor));
+  return nodes;
 }
 
 function getConversationId(message: { conversationId?: string }) {
@@ -788,6 +984,12 @@ function conversationLabel(id: string) {
 
 function safeFilename(value: string) {
   return (value || 'character-card').replace(/[\\/:*?"<>|]+/g, '_').trim() || 'character-card';
+}
+
+function getErrorMessage(error: unknown) {
+  if (!error) return '';
+  if (error instanceof Error) return error.message;
+  return String(error);
 }
 
 function buildFieldAIPrompt(label: string, currentValue: string, mode: 'discuss' | 'revise') {
