@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { BookOpen, Brain, CheckCircle2, Download, FileJson, Languages, Plus, Save, Settings, Sparkles, Trash2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { api, downloadExport } from './api';
-import type { AppSettings, CardProject, CharacterBook, LorebookEntry } from './types';
+import type { AppSettings, CardProject, CharacterBook, CharacterCardV2, LorebookEntry } from './types';
 import i18n from './i18n';
 
 const templates = ['brainstorm', 'generate_card', 'generate_lorebook', 'compress', 'review', 'translate', 'mvu'];
@@ -185,6 +185,7 @@ export function App() {
                 run={() => runLLM.mutate()}
                 running={runLLM.isLoading}
                 project={draft}
+                updateDraft={updateDraft}
               />
             )}
             {tab === 'card' && <CardEditor project={draft} updateDraft={updateDraft} />}
@@ -199,6 +200,7 @@ export function App() {
                 run={() => runLLM.mutate()}
                 running={runLLM.isLoading}
                 project={draft}
+                updateDraft={updateDraft}
               />
             )}
             {tab === 'settings' && settingsDraft && (
@@ -237,26 +239,29 @@ function CardEditor({ project, updateDraft }: { project: CardProject; updateDraf
   const data = project.card.data;
   const setData = (key: keyof typeof data, value: unknown) => updateDraft((p) => ((p.card.data as any)[key] = value));
   return (
-    <section className="editor-grid">
-      <TextField label="name" value={data.name} onChange={(value) => setData('name', value)} />
-      <TextField label="creator" value={data.creator} onChange={(value) => setData('creator', value)} />
-      <TextField label="character_version" value={data.character_version} onChange={(value) => setData('character_version', value)} />
-      <TextField label="tags" value={data.tags.join(', ')} onChange={(value) => setData('tags', splitCommaList(value))} />
-      <TextField label="description" value={data.description} rows={8} onChange={(value) => setData('description', value)} />
-      <TextField label="personality" value={data.personality} rows={8} onChange={(value) => setData('personality', value)} />
-      <TextField label="scenario" value={data.scenario} rows={7} onChange={(value) => setData('scenario', value)} />
-      <TextField label="first_mes" value={data.first_mes} rows={7} onChange={(value) => setData('first_mes', value)} />
-      <TextField label="mes_example" value={data.mes_example} rows={8} onChange={(value) => setData('mes_example', value)} />
-      <TextField label="creator_notes" value={data.creator_notes} rows={6} onChange={(value) => setData('creator_notes', value)} />
-      <TextField label="system_prompt" value={data.system_prompt} rows={6} onChange={(value) => setData('system_prompt', value)} />
-      <TextField label="post_history_instructions" value={data.post_history_instructions} rows={6} onChange={(value) => setData('post_history_instructions', value)} />
-      <TextField
-        label="alternate_greetings"
-        value={data.alternate_greetings.join('\n---\n')}
-        rows={7}
-        onChange={(value) => setData('alternate_greetings', value.split(/\n---\n/g).map((item) => item.trim()).filter(Boolean))}
-      />
-      <TextField label="data.extensions JSON" value={JSON.stringify(data.extensions ?? {}, null, 2)} rows={7} onChange={(value) => setData('extensions', parseJSON(value))} />
+    <section className="stack">
+      <VersionHistory project={project} updateDraft={updateDraft} />
+      <div className="editor-grid">
+        <TextField label="name" value={data.name} onChange={(value) => setData('name', value)} />
+        <TextField label="creator" value={data.creator} onChange={(value) => setData('creator', value)} />
+        <TextField label="character_version" value={data.character_version} onChange={(value) => setData('character_version', value)} />
+        <TextField label="tags" value={data.tags.join(', ')} onChange={(value) => setData('tags', splitCommaList(value))} />
+        <TextField label="description" value={data.description} rows={8} onChange={(value) => setData('description', value)} />
+        <TextField label="personality" value={data.personality} rows={8} onChange={(value) => setData('personality', value)} />
+        <TextField label="scenario" value={data.scenario} rows={7} onChange={(value) => setData('scenario', value)} />
+        <TextField label="first_mes" value={data.first_mes} rows={7} onChange={(value) => setData('first_mes', value)} />
+        <TextField label="mes_example" value={data.mes_example} rows={8} onChange={(value) => setData('mes_example', value)} />
+        <TextField label="creator_notes" value={data.creator_notes} rows={6} onChange={(value) => setData('creator_notes', value)} />
+        <TextField label="system_prompt" value={data.system_prompt} rows={6} onChange={(value) => setData('system_prompt', value)} />
+        <TextField label="post_history_instructions" value={data.post_history_instructions} rows={6} onChange={(value) => setData('post_history_instructions', value)} />
+        <TextField
+          label="alternate_greetings"
+          value={data.alternate_greetings.join('\n---\n')}
+          rows={7}
+          onChange={(value) => setData('alternate_greetings', value.split(/\n---\n/g).map((item) => item.trim()).filter(Boolean))}
+        />
+        <TextField label="data.extensions JSON" value={JSON.stringify(data.extensions ?? {}, null, 2)} rows={7} onChange={(value) => setData('extensions', parseJSON(value))} />
+      </div>
     </section>
   );
 }
@@ -337,6 +342,52 @@ function NumberField(props: { label: string; value: number; onChange: (value: nu
   );
 }
 
+function VersionHistory({ project, updateDraft }: { project: CardProject; updateDraft: (updater: (project: CardProject) => void) => void }) {
+  const { t } = useTranslation();
+  const latest = project.snapshots[0];
+  const diffs = latest ? diffSnapshot(project, latest) : [];
+  return (
+    <section className="version-panel">
+      <div className="version-head">
+        <div>
+          <strong>{t('versionHistory')}</strong>
+          <span>{project.snapshots.length ? `${project.snapshots.length} ${t('snapshots')}` : t('noSnapshots')}</span>
+        </div>
+        <button
+          onClick={() => updateDraft((draft) => pushSnapshot(draft, t('manualSnapshot')))}
+        >
+          <Save size={16} /> {t('snapshot')}
+        </button>
+      </div>
+      {latest && (
+        <div className="snapshot-row">
+          <div>
+            <strong>{latest.label}</strong>
+            <span>{new Date(latest.createdAt).toLocaleString()}</span>
+          </div>
+          <button
+            onClick={() => updateDraft((draft) => {
+              pushSnapshot(draft, 'Before restore');
+              draft.card = structuredClone(latest.card);
+              draft.lorebook = structuredClone(latest.lorebook);
+            })}
+          >
+            {t('restoreLatest')}
+          </button>
+        </div>
+      )}
+      {diffs.length > 0 && (
+        <details className="diff-box">
+          <summary>{t('compareLatest')}</summary>
+          <ul>
+            {diffs.map((diff) => <li key={diff}>{diff}</li>)}
+          </ul>
+        </details>
+      )}
+    </section>
+  );
+}
+
 function TokenPanel({ project, tokenData, updateDraft }: { project: CardProject; tokenData: any; updateDraft: (updater: (project: CardProject) => void) => void }) {
   const { t } = useTranslation();
   const rows = [
@@ -369,8 +420,24 @@ function TokenPanel({ project, tokenData, updateDraft }: { project: CardProject;
   );
 }
 
-function LLMPanel(props: { template: string; setTemplate: (value: string) => void; input: string; setInput: (value: string) => void; run: () => void; running: boolean; project: CardProject }) {
+function LLMPanel(props: {
+  template: string;
+  setTemplate: (value: string) => void;
+  input: string;
+  setInput: (value: string) => void;
+  run: () => void;
+  running: boolean;
+  project: CardProject;
+  updateDraft: (updater: (project: CardProject) => void) => void;
+}) {
   const { t } = useTranslation();
+  const applyCodeBlock = (code: string) => {
+    const parsed = JSON.parse(code);
+    props.updateDraft((project) => {
+      pushSnapshot(project, `Before applying ${props.template}`);
+      applyCardPatch(project, parsed);
+    });
+  };
   return (
     <section className="llm-layout">
       <div className="stack">
@@ -391,11 +458,48 @@ function LLMPanel(props: { template: string; setTemplate: (value: string) => voi
         {props.project.llmHistory.map((message) => (
           <article className="history-item" key={message.id}>
             <div><strong>{message.template}</strong><span>{new Date(message.createdAt).toLocaleString()}</span></div>
-            <pre>{message.response}</pre>
+            <RichResponse text={message.response} onApply={applyCodeBlock} />
           </article>
         ))}
       </div>
     </section>
+  );
+}
+
+function RichResponse({ text, onApply }: { text: string; onApply: (code: string) => void }) {
+  const { t } = useTranslation();
+  const [status, setStatus] = useState('');
+  const parts = splitCodeBlocks(text);
+  const copy = async (code: string) => {
+    await navigator.clipboard.writeText(code);
+    setStatus(t('copied'));
+  };
+  const apply = (code: string) => {
+    try {
+      onApply(code);
+      setStatus(t('appliedToCard'));
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Unable to apply JSON.');
+    }
+  };
+  return (
+    <div className="rich-response">
+      {parts.map((part, index) => part.kind === 'code' ? (
+        <div className="code-block" key={`${part.kind}-${index}`}>
+          <div className="code-toolbar">
+            <span>{part.lang || 'code'}</span>
+            <div>
+              <button onClick={() => copy(part.content)}>{t('copy')}</button>
+              {isJsonLike(part.lang, part.content) && <button onClick={() => apply(part.content)}>{t('applyToCard')}</button>}
+            </div>
+          </div>
+          <pre>{part.content}</pre>
+        </div>
+      ) : (
+        <p key={`${part.kind}-${index}`}>{part.content}</p>
+      ))}
+      {status && <small className="response-status">{status}</small>}
+    </div>
   );
 }
 
@@ -430,6 +534,111 @@ function SettingsPanel({ settings, save }: { settings: AppSettings; save: (setti
       <button className="primary inline" onClick={() => save(draft)}><Save size={16} /> {t('save')}</button>
     </section>
   );
+}
+
+type ResponsePart = { kind: 'text' | 'code'; content: string; lang?: string };
+
+function splitCodeBlocks(text: string): ResponsePart[] {
+  const parts: ResponsePart[] = [];
+  const regex = /```([a-zA-Z0-9_-]*)\n([\s\S]*?)```/g;
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > cursor) {
+      const content = text.slice(cursor, match.index).trim();
+      if (content) parts.push({ kind: 'text', content });
+    }
+    parts.push({ kind: 'code', lang: match[1], content: match[2].trim() });
+    cursor = regex.lastIndex;
+  }
+  const tail = text.slice(cursor).trim();
+  if (tail) parts.push({ kind: 'text', content: tail });
+  return parts.length ? parts : [{ kind: 'text' as const, content: text }];
+}
+
+function isJsonLike(lang: string | undefined, content: string) {
+  const trimmed = content.trim();
+  return lang?.toLowerCase() === 'json' || trimmed.startsWith('{') || trimmed.startsWith('[');
+}
+
+function pushSnapshot(project: CardProject, label: string) {
+  project.snapshots.unshift({
+    id: `snap_${Date.now()}`,
+    label,
+    card: structuredClone(project.card),
+    lorebook: structuredClone(project.lorebook),
+    createdAt: new Date().toISOString(),
+  });
+  project.snapshots = project.snapshots.slice(0, 20);
+}
+
+function applyCardPatch(project: CardProject, payload: any) {
+  if (Array.isArray(payload)) {
+    project.lorebook.entries = payload;
+    return;
+  }
+  const source = payload.card ?? payload.character_card ?? payload;
+  if (source.spec === 'chara_card_v2' && source.data) {
+    project.card = normalizeCard(source);
+    if (source.data.character_book) {
+      project.lorebook = source.data.character_book;
+    }
+    return;
+  }
+  if (payload.lorebook || payload.character_book) {
+    project.lorebook = payload.lorebook ?? payload.character_book;
+  }
+  const dataPatch = source.data ?? source;
+  const cardKeys = [
+    'name',
+    'description',
+    'personality',
+    'scenario',
+    'first_mes',
+    'mes_example',
+    'creator_notes',
+    'system_prompt',
+    'post_history_instructions',
+    'alternate_greetings',
+    'tags',
+    'creator',
+    'character_version',
+    'extensions',
+  ];
+  for (const key of cardKeys) {
+    if (Object.prototype.hasOwnProperty.call(dataPatch, key)) {
+      (project.card.data as any)[key] = dataPatch[key];
+    }
+  }
+}
+
+function normalizeCard(card: any): CharacterCardV2 {
+  return {
+    spec: 'chara_card_v2' as const,
+    spec_version: card.spec_version ?? '2.0',
+    data: {
+      alternate_greetings: [],
+      tags: [],
+      extensions: {},
+      ...card.data,
+    },
+    extensions: card.extensions ?? {},
+  };
+}
+
+function diffSnapshot(project: CardProject, snapshot: CardProject['snapshots'][number]) {
+  const diffs: string[] = [];
+  const currentData = project.card.data as any;
+  const oldData = snapshot.card.data as any;
+  for (const key of ['name', 'description', 'personality', 'scenario', 'first_mes', 'mes_example', 'creator_notes', 'system_prompt', 'post_history_instructions', 'tags', 'alternate_greetings']) {
+    if (JSON.stringify(currentData[key]) !== JSON.stringify(oldData[key])) {
+      diffs.push(`card.data.${key} changed`);
+    }
+  }
+  if (JSON.stringify(project.lorebook.entries) !== JSON.stringify(snapshot.lorebook.entries)) {
+    diffs.push('lorebook.entries changed');
+  }
+  return diffs;
 }
 
 function splitCommaList(value: string) {

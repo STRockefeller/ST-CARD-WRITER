@@ -311,6 +311,100 @@ button:disabled {
   margin: 0;
 }
 
+.rich-response {
+  display: grid;
+  gap: 12px;
+}
+
+.rich-response p {
+  white-space: pre-wrap;
+  line-height: 1.55;
+  margin: 0;
+}
+
+.code-block {
+  border: 1px solid #cbd2c9;
+  background: #f8faf7;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.code-toolbar {
+  min-height: 42px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-bottom: 1px solid #d8ded5;
+  background: #eef1eb;
+}
+
+.code-toolbar span {
+  color: #4f5b56;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.code-toolbar div {
+  display: flex;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.code-block pre {
+  max-height: 360px;
+  overflow: auto;
+  padding: 12px;
+}
+
+.response-status {
+  color: #215b4b;
+}
+
+.version-panel {
+  border: 1px solid #d8ded5;
+  background: #fff;
+  border-radius: 8px;
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+}
+
+.version-head, .snapshot-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.version-head div, .snapshot-row div {
+  display: grid;
+  gap: 3px;
+}
+
+.version-head span, .snapshot-row span {
+  color: #62706a;
+  font-size: 12px;
+}
+
+.diff-box {
+  border-top: 1px solid #e3e8e0;
+  padding-top: 10px;
+}
+
+.diff-box summary {
+  cursor: pointer;
+  color: #215b4b;
+  font-weight: 650;
+}
+
+.diff-box ul {
+  margin: 10px 0 0;
+  padding-left: 20px;
+}
+
 .hint {
   color: #64716b;
   font-size: 13px;
