@@ -70,10 +70,14 @@ func BuildQuickToolPrompt(tool string, locale string, project model.Project) str
 		base = append(base, strings.Join([]string{
 			"Create a concise persona description for the human user to roleplay opposite this card.",
 			"Infer a useful role, relationship, and minimum context from the card, but leave the user's personality, decisions, feelings, and detailed history open for roleplay.",
-			"Unless the card requires special constraints, output only a suitable name and one short paragraph. Never use {{user}} as the persona's literal name.",
+			"Always provide a concrete proper name appropriate to the card's language, culture, time period, and setting. If the card explicitly defines the user's real name, use it; otherwise invent one.",
+			"The NAME value must never be a placeholder or pronoun. Forbidden names include: 你, 妳, 您, You, User, Player, 玩家, 主角, {{user}}, and unnamed equivalents.",
+			"Write DESCRIPTION entirely in third person. Refer to the generated persona as {{user}} and the card character as {{char}}. Do not address the reader as 'you', and do not use first-person narration.",
+			"Keep DESCRIPTION concise: normally one short paragraph covering only {{user}}'s role, essential background, and relationship or starting connection with {{char}}.",
+			"Leave {{user}}'s personality, thoughts, feelings, choices, and detailed history open unless the card requires a specific constraint.",
 			"Use exactly this plain-text format:",
-			"NAME: <name>",
-			"DESCRIPTION: <one concise paragraph>",
+			"NAME: <concrete proper name only>",
+			"DESCRIPTION: <one concise third-person paragraph using {{user}} and {{char}}>",
 		}, "\n"))
 	}
 	return strings.Join(base, "\n\n")

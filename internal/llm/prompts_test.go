@@ -55,6 +55,17 @@ func TestQuickToolPromptsUseCurrentCardWithoutConversationInstructions(t *testin
 	if strings.Contains(persona, "Conversation so far") {
 		t.Fatalf("quick tool prompt should not include conversation history")
 	}
+	for _, requirement := range []string{
+		"concrete proper name",
+		"Forbidden names include",
+		"entirely in third person",
+		"persona as {{user}}",
+		"card character as {{char}}",
+	} {
+		if !strings.Contains(persona, requirement) {
+			t.Fatalf("persona prompt is missing requirement %q", requirement)
+		}
+	}
 
 	cover := BuildQuickToolPrompt("cover_prompt", "en", project)
 	if !strings.Contains(cover, "NATURAL_LANGUAGE:") || !strings.Contains(cover, "BOORU_TAGS:") {
