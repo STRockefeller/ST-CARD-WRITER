@@ -153,6 +153,22 @@ export function App() {
     },
   });
 
+  const convertChinese = useMutation({
+    mutationFn: (mode: 's2t' | 't2s') => api.convertChinese(draft!.id, mode),
+    onSuccess(project) {
+      setAppError('');
+      setDraft(structuredClone(project));
+      queryClient.setQueryData<CardProject[]>(['projects'], (projects) =>
+        projects?.map((item) => (item.id === project.id ? project : item)) ?? [project],
+      );
+      queryClient.invalidateQueries({ queryKey: ['projects'] });
+      queryClient.invalidateQueries({ queryKey: ['tokens', project.id] });
+    },
+    onError(error) {
+      setAppError(getErrorMessage(error));
+    },
+  });
+
   const runLLM = useMutation({
     mutationFn: (request?: LLMRunRequest) =>
       api.runLLM(
@@ -419,6 +435,9 @@ export function App() {
                 setConversationId={setConversationId}
                 templates={reviewTemplates}
                 mode="review"
+                showChineseConversion={Boolean(settingsDraft?.promptLocale?.startsWith('zh'))}
+                convertChinese={(mode) => convertChinese.mutate(mode)}
+                convertingChinese={convertChinese.isLoading}
                 fieldTarget={fieldTarget}
                 clearFieldTarget={() => setFieldTarget(null)}
               />
@@ -778,6 +797,9 @@ function LLMPanel(props: {
   setConversationId: (value: string) => void;
   templates: string[];
   mode: 'brainstorm' | 'review';
+  showChineseConversion?: boolean;
+  convertChinese?: (mode: 's2t' | 't2s') => void;
+  convertingChinese?: boolean;
   fieldTarget: FieldTarget | null;
   clearFieldTarget: () => void;
 }) {
@@ -854,6 +876,22 @@ function LLMPanel(props: {
           </>
         ) : (
           <>
+            {props.showChineseConversion && (
+              <section className="utility-panel">
+                <div>
+                  <strong>{t('chineseConversion')}</strong>
+                  <span>{t('chineseConversionHint')}</span>
+                </div>
+                <div className="task-actions">
+                  <button onClick={() => props.convertChinese?.('s2t')} disabled={props.convertingChinese}>
+                    {props.convertingChinese ? '...' : t('simplifiedToTraditional')}
+                  </button>
+                  <button onClick={() => props.convertChinese?.('t2s')} disabled={props.convertingChinese}>
+                    {props.convertingChinese ? '...' : t('traditionalToSimplified')}
+                  </button>
+                </div>
+              </section>
+            )}
             <label className="field">
               <span>{t('task')}</span>
               <select value={props.template} onChange={(event) => props.setTemplate(event.target.value)}>

@@ -18,14 +18,13 @@ type TemplateRequest struct {
 }
 
 func BuildPrompt(req TemplateRequest) string {
-	card, _ := json.MarshalIndent(req.Project.Card.Data, "", "  ")
-	lore, _ := json.MarshalIndent(req.Project.Lorebook, "", "  ")
 	locale := req.Locale
 	if locale == "" {
 		locale = "zh-TW"
 	}
 
 	selected := templateInstruction(req.Template)
+	projectContext := formatProjectContext(req)
 	parts := []string{
 		"Respond in this locale: " + locale + ". For zh-TW, use natural Traditional Chinese.",
 		cardWritingRules(),
@@ -33,8 +32,7 @@ func BuildPrompt(req TemplateRequest) string {
 		formatCreativePreferences(req.Project.Settings),
 		selected,
 		formatPriorMessages(req.PriorMessages),
-		"\nCurrent card data:\n" + string(card),
-		"\nCurrent lorebook:\n" + string(lore),
+		projectContext,
 	}
 	if strings.TrimSpace(req.Input) != "" {
 		parts = append(parts, "\nUser request:\n"+req.Input)
@@ -64,6 +62,143 @@ func formatCreativePreferences(settings model.ProjectSettings) string {
 		lines = append(lines, "- Worldview: unset; do not force a genre.")
 	}
 	return strings.Join(lines, "\n")
+}
+
+func formatProjectContext(req TemplateRequest) string {
+	switch req.Template {
+	case "translate":
+		return formatTranslationContext(req.Project)
+	case "mvu":
+		return formatMVUContext(req.Project)
+	default:
+		card, _ := json.MarshalIndent(req.Project.Card.Data, "", "  ")
+		lore, _ := json.MarshalIndent(req.Project.Lorebook, "", "  ")
+		return "\nCurrent card data:\n" + string(card) + "\n\nCurrent lorebook:\n" + string(lore)
+	}
+}
+
+type translationCardData struct {
+	Name                    string   `json:"name"`
+	Description             string   `json:"description"`
+	Personality             string   `json:"personality"`
+	Scenario                string   `json:"scenario"`
+	FirstMes                string   `json:"first_mes"`
+	MesExample              string   `json:"mes_example"`
+	CreatorNotes            string   `json:"creator_notes"`
+	SystemPrompt            string   `json:"system_prompt"`
+	PostHistoryInstructions string   `json:"post_history_instructions"`
+	AlternateGreetings      []string `json:"alternate_greetings"`
+	Tags                    []string `json:"tags"`
+}
+
+type translationLoreEntry struct {
+	ID            int      `json:"id"`
+	Keys          []string `json:"keys"`
+	SecondaryKeys []string `json:"secondary_keys"`
+	Comment       string   `json:"comment"`
+	Content       string   `json:"content"`
+	Enabled       bool     `json:"enabled"`
+	Constant      bool     `json:"constant"`
+	Selective     bool     `json:"selective"`
+	Position      string   `json:"position"`
+}
+
+type translationContext struct {
+	Card    translationCardData    `json:"card"`
+	Entries []translationLoreEntry `json:"lorebook_entries"`
+	Notice  string                 `json:"notice"`
+}
+
+func formatTranslationContext(project model.Project) string {
+	entries := make([]translationLoreEntry, 0, len(project.Lorebook.Entries))
+	for _, entry := range project.Lorebook.Entries {
+		entries = append(entries, translationLoreEntry{
+			ID:            entry.ID,
+			Keys:          entry.Keys,
+			SecondaryKeys: entry.SecondaryKeys,
+			Comment:       entry.Comment,
+			Content:       entry.Content,
+			Enabled:       entry.Enabled,
+			Constant:      entry.Constant,
+			Selective:     entry.Selective,
+			Position:      entry.Position,
+		})
+	}
+	context := translationContext{
+		Card: translationCardData{
+			Name:                    project.Card.Data.Name,
+			Description:             project.Card.Data.Description,
+			Personality:             project.Card.Data.Personality,
+			Scenario:                project.Card.Data.Scenario,
+			FirstMes:                project.Card.Data.FirstMes,
+			MesExample:              project.Card.Data.MesExample,
+			CreatorNotes:            project.Card.Data.CreatorNotes,
+			SystemPrompt:            project.Card.Data.SystemPrompt,
+			PostHistoryInstructions: project.Card.Data.PostHistoryInstructions,
+			AlternateGreetings:      project.Card.Data.AlternateGreetings,
+			Tags:                    project.Card.Data.Tags,
+		},
+		Entries: entries,
+		Notice:  "Extensions and non-text metadata are intentionally omitted from this prompt. Preserve IDs, keys, variable names, macros, MVU code, and entry structure in any patch output.",
+	}
+	raw, _ := json.MarshalIndent(context, "", "  ")
+	text := string(raw)
+	const limit = 85000
+	if len(text) <= limit {
+		return "\nTranslation context:\n" + text
+	}
+	return "\nTranslation context is very large, so this request includes the first safe batch only. Translate the included fields and explicitly tell the user that remaining lorebook entries need another pass.\n" + safeTruncateJSONText(text, limit)
+}
+
+func formatMVUContext(project model.Project) string {
+	entries := make([]translationLoreEntry, 0, len(project.Lorebook.Entries))
+	for _, entry := range project.Lorebook.Entries {
+		if strings.Contains(entry.Content, "getvar(") ||
+			strings.Contains(entry.Content, "setvar(") ||
+			strings.Contains(entry.Content, "stat_data") ||
+			strings.Contains(entry.Content, "<%") ||
+			strings.Contains(entry.Comment, "MVU") {
+			entries = append(entries, translationLoreEntry{
+				ID:            entry.ID,
+				Keys:          entry.Keys,
+				SecondaryKeys: entry.SecondaryKeys,
+				Comment:       entry.Comment,
+				Content:       entry.Content,
+				Enabled:       entry.Enabled,
+				Constant:      entry.Constant,
+				Selective:     entry.Selective,
+				Position:      entry.Position,
+			})
+		}
+	}
+	context := map[string]any{
+		"card_name":        project.Card.Data.Name,
+		"system_prompt":    project.Card.Data.SystemPrompt,
+		"creator_notes":    project.Card.Data.CreatorNotes,
+		"mvu_like_entries": entries,
+		"notice":           "Only MVU-like entries and related text are included. Preserve variable names, getvar/setvar calls, macros, and code delimiters.",
+	}
+	raw, _ := json.MarshalIndent(context, "", "  ")
+	text := string(raw)
+	const limit = 85000
+	if len(text) <= limit {
+		return "\nMVU inspection context:\n" + text
+	}
+	return "\nMVU inspection context is very large, so this request includes the first safe batch only. Inspect the included entries and tell the user another pass is needed for omitted entries.\n" + safeTruncateJSONText(text, limit)
+}
+
+func safeTruncateJSONText(text string, limit int) string {
+	if len(text) <= limit {
+		return text
+	}
+	cut := limit
+	for cut > 0 && !strings.HasSuffix(text[:cut], "\n") {
+		cut--
+	}
+	if cut < limit/2 {
+		cut = limit
+	}
+	return text[:cut] + "\n\n...TRUNCATED_FOR_MODEL_LIMIT..."
 }
 
 func writingStyleInstruction(value string) string {
@@ -193,7 +328,9 @@ func templateInstruction(template string) string {
 		return strings.Join([]string{
 			"MODE: translation.",
 			"Protect {{char}}, {{user}}, macros, URLs, file paths, JSON keys, MVU variable names, and fenced code blocks.",
-			"If you output applicable translated card data, put it in a fenced json code block.",
+			"Translate natural-language prose into the requested target language while preserving all MVU code delimiters, getvar/setvar calls, variable names, entry IDs, keys, and JSON field names.",
+			"Prefer an applicable JSON patch-like object in a fenced json code block, containing only translated fields and lorebook entry IDs/content that changed.",
+			"If the context says it was truncated, translate only the included batch and clearly say another pass is needed for omitted entries.",
 		}, "\n")
 	case "mvu":
 		return strings.Join([]string{

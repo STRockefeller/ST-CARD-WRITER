@@ -23,6 +23,8 @@ export const api = {
     request<CardProject>(`/api/projects/${project.id}`, { method: 'PUT', body: JSON.stringify(project) }),
   deleteProject: (projectId: string) =>
     request<{ ok: string }>(`/api/projects/${projectId}`, { method: 'DELETE' }),
+  convertChinese: (projectId: string, mode: 's2t' | 't2s') =>
+    request<CardProject>(`/api/projects/${projectId}/chinese-convert`, { method: 'POST', body: JSON.stringify({ mode }) }),
   exportCard: (projectId: string) =>
     request<CharacterCardV2>(`/api/projects/${projectId}/export`, { method: 'POST' }),
   tokens: (projectId: string) => request<TokenBudget>(`/api/projects/${projectId}/tokens`),

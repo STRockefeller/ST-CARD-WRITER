@@ -14,6 +14,7 @@ import (
 	"st-card-writer/internal/llm"
 	"st-card-writer/internal/model"
 	"st-card-writer/internal/store"
+	"st-card-writer/internal/zhconvert"
 )
 
 type Server struct {
@@ -90,6 +91,10 @@ func (s *Server) projectByID(w http.ResponseWriter, r *http.Request) {
 		s.exportProject(w, id)
 		return
 	}
+	if len(parts) == 2 && parts[1] == "chinese-convert" && r.Method == http.MethodPost {
+		s.convertChineseProject(w, r, id)
+		return
+	}
 	if len(parts) == 2 && parts[1] == "tokens" && r.Method == http.MethodGet {
 		project, err := s.store.GetProject(id)
 		if err != nil {
@@ -155,6 +160,47 @@ func (s *Server) exportProject(w http.ResponseWriter, id string) {
 		card.Data.CharacterBook = nil
 	}
 	writeJSON(w, card)
+}
+
+func (s *Server) convertChineseProject(w http.ResponseWriter, r *http.Request, id string) {
+	var body struct {
+		Mode string `json:"mode"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, err, http.StatusBadRequest)
+		return
+	}
+	project, err := s.store.GetProject(id)
+	if err != nil {
+		writeError(w, err, http.StatusNotFound)
+		return
+	}
+	label := "Before Chinese conversion"
+	if body.Mode == "s2t" {
+		label = "Before Simplified to Traditional conversion"
+	}
+	if body.Mode == "t2s" {
+		label = "Before Traditional to Simplified conversion"
+	}
+	project.Snapshots = append([]model.Snapshot{{
+		ID:        "snap_" + time.Now().UTC().Format("20060102150405.000000000"),
+		Label:     label,
+		Card:      project.Card,
+		Lorebook:  project.Lorebook,
+		CreatedAt: time.Now().UTC(),
+	}}, project.Snapshots...)
+	if len(project.Snapshots) > 20 {
+		project.Snapshots = project.Snapshots[:20]
+	}
+	if err := zhconvert.ConvertProject(&project, body.Mode); err != nil {
+		writeError(w, err, http.StatusBadRequest)
+		return
+	}
+	if err := s.store.SaveProject(project); err != nil {
+		writeError(w, err, http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, project)
 }
 
 func (s *Server) settings(w http.ResponseWriter, r *http.Request) {

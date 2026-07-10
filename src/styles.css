@@ -546,6 +546,30 @@ button:disabled {
   align-items: center;
 }
 
+.utility-panel {
+  border: 1px solid rgba(31, 95, 79, 0.14);
+  background: rgba(230, 243, 238, 0.58);
+  border-radius: 13px;
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.utility-panel > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.utility-panel strong {
+  color: var(--brand-strong);
+}
+
+.utility-panel span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .field-target-banner {
   border: 1px solid rgba(31, 95, 79, 0.16);
   background: #f2f8f5;

@@ -50,6 +50,9 @@ func (c DeepSeekClient) Complete(prompt string) (string, error) {
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		return "", fmt.Errorf("deepseek request failed: %s", string(payload))
 	}
+	if len(bytes.TrimSpace(payload)) == 0 {
+		return "", fmt.Errorf("deepseek returned an empty response body; the request may be too large or the provider closed the response early (prompt chars: %d)", len(prompt))
+	}
 
 	var decoded struct {
 		Choices []struct {
@@ -59,10 +62,17 @@ func (c DeepSeekClient) Complete(prompt string) (string, error) {
 		} `json:"choices"`
 	}
 	if err := json.Unmarshal(payload, &decoded); err != nil {
-		return "", err
+		return "", fmt.Errorf("deepseek returned invalid JSON (prompt chars: %d, response chars: %d): %w; response prefix: %q", len(prompt), len(payload), err, string(payload[:prefixLen(len(payload), 500)]))
 	}
 	if len(decoded.Choices) == 0 {
 		return "", errors.New("deepseek returned no choices")
 	}
 	return decoded.Choices[0].Message.Content, nil
+}
+
+func prefixLen(length int, limit int) int {
+	if length < limit {
+		return length
+	}
+	return limit
 }
