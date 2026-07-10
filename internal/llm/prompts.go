@@ -40,6 +40,45 @@ func BuildPrompt(req TemplateRequest) string {
 	return strings.Join(parts, "\n\n")
 }
 
+func BuildQuickToolPrompt(tool string, locale string, project model.Project) string {
+	if locale == "" {
+		locale = "zh-TW"
+	}
+	card, _ := json.MarshalIndent(project.Card.Data, "", "  ")
+	lore, _ := json.MarshalIndent(project.Lorebook, "", "  ")
+	base := []string{
+		"Respond in this locale: " + locale + ". For zh-TW, use natural Traditional Chinese.",
+		"This is a one-shot utility. Return only the requested artifact, with no preamble, explanation, markdown fence, or follow-up question.",
+		"Understand the complete character card and lorebook before answering. Do not rewrite the card.",
+		formatCreativePreferences(project.Settings),
+		"Current card data:\n" + string(card),
+		"Current lorebook:\n" + string(lore),
+	}
+	if tool == "cover_prompt" {
+		base = append(base, strings.Join([]string{
+			"Create two text-to-image prompts for this card's cover.",
+			"For a normal character card, prioritize a clear, attractive depiction of the character, recognizable appearance, personality, pose, expression, clothing, and strong composition. Add a fitting background or a small story moment only when it improves the image.",
+			"For storyteller, scenario, ensemble, or world cards, depict the central premise, cast, location, mood, or narrative hook instead of forcing a single-character portrait.",
+			"Do not include {{user}} unless the card concept specifically requires {{user}} to appear. Avoid artist names and copyrighted style imitation.",
+			"Use exactly this plain-text format:",
+			"NATURAL_LANGUAGE:",
+			"<one polished natural-language image prompt>",
+			"BOORU_TAGS:",
+			"<comma-separated booru-style tags>",
+		}, "\n"))
+	} else {
+		base = append(base, strings.Join([]string{
+			"Create a concise persona description for the human user to roleplay opposite this card.",
+			"Infer a useful role, relationship, and minimum context from the card, but leave the user's personality, decisions, feelings, and detailed history open for roleplay.",
+			"Unless the card requires special constraints, output only a suitable name and one short paragraph. Never use {{user}} as the persona's literal name.",
+			"Use exactly this plain-text format:",
+			"NAME: <name>",
+			"DESCRIPTION: <one concise paragraph>",
+		}, "\n"))
+	}
+	return strings.Join(base, "\n\n")
+}
+
 func formatCreativePreferences(settings model.ProjectSettings) string {
 	lines := []string{
 		"CREATIVE PREFERENCES:",

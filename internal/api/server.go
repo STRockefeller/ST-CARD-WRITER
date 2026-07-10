@@ -33,6 +33,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/settings", s.settings)
 	mux.HandleFunc("/api/import", s.importCard)
 	mux.HandleFunc("/api/llm", s.llm)
+	mux.HandleFunc("/api/llm/quick-tool", s.quickTool)
 	return withCORS(mux)
 }
 
@@ -443,6 +444,40 @@ func (s *Server) llm(w http.ResponseWriter, r *http.Request) {
 	project.LLMHistory = append([]model.LLMMessage{message}, project.LLMHistory...)
 	_ = s.store.SaveProject(project)
 	writeJSON(w, message)
+}
+
+func (s *Server) quickTool(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		Tool    string        `json:"tool"`
+		Locale  string        `json:"locale"`
+		Project model.Project `json:"project"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, err, http.StatusBadRequest)
+		return
+	}
+	if body.Tool != "user_persona" && body.Tool != "cover_prompt" {
+		writeError(w, errors.New("unsupported quick tool"), http.StatusBadRequest)
+		return
+	}
+	settings, err := s.store.GetSettings()
+	if err != nil {
+		writeError(w, err, http.StatusInternalServerError)
+		return
+	}
+	prompt := llm.BuildQuickToolPrompt(body.Tool, body.Locale, body.Project)
+	log.Printf("llm quick tool project=%s tool=%s model=%s prompt_chars=%d", body.Project.ID, body.Tool, settings.DeepSeekModel, len(prompt))
+	response, err := llm.DeepSeekClient{APIKey: settings.DeepSeekAPIKey, Model: settings.DeepSeekModel}.Complete(prompt)
+	if err != nil {
+		log.Printf("llm quick tool error project=%s tool=%s error=%v", body.Project.ID, body.Tool, err)
+		writeError(w, err, http.StatusBadGateway)
+		return
+	}
+	writeJSON(w, map[string]string{"tool": body.Tool, "response": response})
 }
 
 func appendLLMLog(kind string, projectID string, conversationID string, template string, modelName string, input string, prompt string, output string) {

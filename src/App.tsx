@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BookOpen, Brain, CheckCircle2, Clipboard, Download, FileJson, Languages, PanelLeftClose, PanelLeftOpen, Plus, Save, Settings, Sparkles, Trash2 } from 'lucide-react';
+import { BookOpen, Brain, CheckCircle2, ChevronDown, Clipboard, Download, FileJson, Image, Languages, PanelLeftClose, PanelLeftOpen, Plus, Save, Settings, Sparkles, Trash2, UserRound, WandSparkles, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { api } from './api';
 import type { AppSettings, CardProject, CharacterBook, CharacterCardV2, LorebookEntry } from './types';
@@ -47,6 +47,8 @@ export function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [appError, setAppError] = useState('');
   const [dismissedQueryError, setDismissedQueryError] = useState('');
+  const [quickResult, setQuickResult] = useState<{ tool: 'user_persona' | 'cover_prompt'; response: string } | null>(null);
+  const [quickCopied, setQuickCopied] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
   const activeProjectRef = useRef('');
 
@@ -195,6 +197,19 @@ export function App() {
         }
       }
       queryClient.invalidateQueries({ queryKey: ['projects'] });
+    },
+    onError(error) {
+      setAppError(getErrorMessage(error));
+    },
+  });
+
+  const runQuickTool = useMutation({
+    mutationFn: (tool: 'user_persona' | 'cover_prompt') =>
+      api.runQuickTool(tool, settingsQuery.data?.promptLocale ?? 'zh-TW', draft!),
+    onSuccess(result) {
+      setAppError('');
+      setQuickCopied('');
+      setQuickResult({ tool: result.tool as 'user_persona' | 'cover_prompt', response: result.response });
     },
     onError(error) {
       setAppError(getErrorMessage(error));
@@ -363,6 +378,21 @@ export function App() {
                 onChange={(event) => updateDraft((project) => (project.title = event.target.value))}
               />
               <div className="topbar-actions">
+                <details className="quick-tools-menu">
+                  <summary>
+                    <WandSparkles size={16} /> {t('quickTools')} <ChevronDown size={14} />
+                  </summary>
+                  <div className="quick-tools-popover">
+                    <button onClick={(event) => { event.currentTarget.closest('details')?.removeAttribute('open'); runQuickTool.mutate('user_persona'); }} disabled={runQuickTool.isLoading}>
+                      <UserRound size={16} />
+                      <span><strong>{t('generateUserPersona')}</strong><small>{t('generateUserPersonaHint')}</small></span>
+                    </button>
+                    <button onClick={(event) => { event.currentTarget.closest('details')?.removeAttribute('open'); runQuickTool.mutate('cover_prompt'); }} disabled={runQuickTool.isLoading}>
+                      <Image size={16} />
+                      <span><strong>{t('generateCoverPrompt')}</strong><small>{t('generateCoverPromptHint')}</small></span>
+                    </button>
+                  </div>
+                </details>
                 <button className="ghost" onClick={() => setSidebarCollapsed((value) => !value)}>
                   {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
                   {sidebarCollapsed ? t('showProjects') : t('hideProjects')}
@@ -445,11 +475,77 @@ export function App() {
             {tab === 'settings' && settingsDraft && (
               <ProjectSettingsPanel settings={settingsDraft} project={draft} updateDraft={updateDraft} save={(next) => saveSettings.mutate(next)} />
             )}
+            {quickResult && (
+              <QuickResultModal
+                result={quickResult}
+                copied={quickCopied}
+                onCopy={async (label, content) => {
+                  await navigator.clipboard.writeText(content);
+                  setQuickCopied(label);
+                }}
+                onClose={() => setQuickResult(null)}
+              />
+            )}
           </>
         )}
       </main>
     </div>
   );
+}
+
+function QuickResultModal(props: {
+  result: { tool: 'user_persona' | 'cover_prompt'; response: string };
+  copied: string;
+  onCopy: (label: string, content: string) => void;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation();
+  const sections = props.result.tool === 'cover_prompt' ? parseCoverPrompt(props.result.response) : [];
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && props.onClose()}>
+      <section className="result-modal" role="dialog" aria-modal="true" aria-label={t(props.result.tool === 'cover_prompt' ? 'coverPromptResult' : 'userPersonaResult')}>
+        <header>
+          <div>
+            {props.result.tool === 'cover_prompt' ? <Image size={20} /> : <UserRound size={20} />}
+            <h2>{t(props.result.tool === 'cover_prompt' ? 'coverPromptResult' : 'userPersonaResult')}</h2>
+          </div>
+          <button className="icon-button" onClick={props.onClose} aria-label={t('dismiss')} title={t('dismiss')}><X size={18} /></button>
+        </header>
+        {sections.length ? sections.map((section) => (
+          <article className="result-section" key={section.label}>
+            <div className="result-section-heading">
+              <strong>{t(section.label)}</strong>
+              <button onClick={() => props.onCopy(section.label, section.content)}>
+                <Clipboard size={15} /> {props.copied === section.label ? t('copied') : t('copy')}
+              </button>
+            </div>
+            <pre>{section.content}</pre>
+          </article>
+        )) : (
+          <article className="result-section">
+            <div className="result-section-heading">
+              <strong>{t('result')}</strong>
+              <button onClick={() => props.onCopy('all', props.result.response)}>
+                <Clipboard size={15} /> {props.copied === 'all' ? t('copied') : t('copy')}
+              </button>
+            </div>
+            <pre>{props.result.response}</pre>
+          </article>
+        )}
+        <p className="hint">{t('quickResultNotSaved')}</p>
+      </section>
+    </div>
+  );
+}
+
+function parseCoverPrompt(response: string) {
+  const natural = response.match(/NATURAL_LANGUAGE:\s*([\s\S]*?)(?=\n\s*BOORU_TAGS:|$)/i)?.[1]?.trim();
+  const booru = response.match(/BOORU_TAGS:\s*([\s\S]*)$/i)?.[1]?.trim();
+  if (!natural || !booru) return [];
+  return [
+    { label: 'naturalLanguagePrompt', content: natural },
+    { label: 'booruTags', content: booru },
+  ];
 }
 
 function buildExportCard(project: CardProject): CharacterCardV2 {

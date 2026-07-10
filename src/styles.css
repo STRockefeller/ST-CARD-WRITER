@@ -250,6 +250,133 @@ button:disabled {
   justify-content: flex-end;
 }
 
+.quick-tools-menu {
+  position: relative;
+}
+
+.quick-tools-menu summary {
+  list-style: none;
+  min-height: 38px;
+  border: 1px solid rgba(31, 95, 79, 0.18);
+  background: rgba(255, 255, 255, 0.78);
+  color: var(--brand-strong);
+  border-radius: 10px;
+  padding: 8px 11px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  box-shadow: 0 2px 7px rgba(20, 34, 29, 0.04);
+}
+
+.quick-tools-menu summary::-webkit-details-marker {
+  display: none;
+}
+
+.quick-tools-popover {
+  position: absolute;
+  z-index: 20;
+  right: 0;
+  top: calc(100% + 8px);
+  width: 310px;
+  padding: 8px;
+  display: grid;
+  gap: 5px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.97);
+  box-shadow: 0 18px 45px rgba(18, 45, 37, 0.16);
+}
+
+.quick-tools-popover button {
+  justify-content: flex-start;
+  text-align: left;
+  padding: 11px;
+}
+
+.quick-tools-popover button span {
+  display: grid;
+  gap: 3px;
+}
+
+.quick-tools-popover small {
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.modal-backdrop {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(13, 29, 24, 0.42);
+  backdrop-filter: blur(3px);
+}
+
+.result-modal {
+  width: min(760px, 100%);
+  max-height: min(760px, calc(100vh - 40px));
+  overflow: auto;
+  border: 1px solid rgba(255, 255, 255, 0.65);
+  border-radius: 14px;
+  background: #f9fbf9;
+  padding: 18px;
+  box-shadow: 0 28px 80px rgba(10, 28, 22, 0.3);
+}
+
+.result-modal > header,
+.result-modal > header > div,
+.result-section-heading {
+  display: flex;
+  align-items: center;
+}
+
+.result-modal > header {
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.result-modal > header > div {
+  gap: 9px;
+}
+
+.result-modal h2 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.icon-button {
+  width: 38px;
+  padding: 0;
+}
+
+.result-section {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  overflow: hidden;
+  margin-top: 10px;
+}
+
+.result-section-heading {
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 10px 9px 14px;
+  background: #eef4f0;
+}
+
+.result-section pre {
+  margin: 0;
+  padding: 16px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  line-height: 1.65;
+}
+
 .export-status {
   border: 1px solid rgba(31, 95, 79, 0.16);
   background: #eef7f2;

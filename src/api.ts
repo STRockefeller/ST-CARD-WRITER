@@ -38,6 +38,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ projectId, conversationId, template, locale, input }),
     }),
+  runQuickTool: (tool: 'user_persona' | 'cover_prompt', locale: string, project: CardProject) =>
+    request<{ tool: string; response: string }>('/api/llm/quick-tool', {
+      method: 'POST',
+      body: JSON.stringify({ tool, locale, project }),
+    }),
 };
 
 export async function downloadExport(projectId: string, filename: string) {

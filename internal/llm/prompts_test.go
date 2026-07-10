@@ -41,3 +41,26 @@ func TestTranslatePromptUsesCompactContext(t *testing.T) {
 		t.Fatalf("expected compact prompt to omit extensions, got:\n%s", prompt)
 	}
 }
+
+func TestQuickToolPromptsUseCurrentCardWithoutConversationInstructions(t *testing.T) {
+	project := model.NewProject("Quick tools")
+	project.Card.Data.Name = "Lin Yue"
+	project.Card.Data.Description = "A reserved swordmaster protecting an old friend."
+	project.Lorebook.Entries = append(project.Lorebook.Entries, model.LorebookEntry{ID: 1, Content: "The mountain sect values restraint."})
+
+	persona := BuildQuickToolPrompt("user_persona", "en", project)
+	if !strings.Contains(persona, "NAME:") || !strings.Contains(persona, "Lin Yue") {
+		t.Fatalf("persona prompt is missing output format or card context: %s", persona)
+	}
+	if strings.Contains(persona, "Conversation so far") {
+		t.Fatalf("quick tool prompt should not include conversation history")
+	}
+
+	cover := BuildQuickToolPrompt("cover_prompt", "en", project)
+	if !strings.Contains(cover, "NATURAL_LANGUAGE:") || !strings.Contains(cover, "BOORU_TAGS:") {
+		t.Fatalf("cover prompt is missing stable section markers: %s", cover)
+	}
+	if !strings.Contains(cover, "mountain sect") {
+		t.Fatalf("cover prompt should include lorebook context")
+	}
+}
