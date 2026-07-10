@@ -20,6 +20,12 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	if _, err := db.Exec(`PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;`); err != nil {
+		db.Close()
+		return nil, err
+	}
 	store := &Store{db: db}
 	if err := store.migrate(); err != nil {
 		db.Close()
@@ -99,6 +105,21 @@ VALUES (?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET title = excluded.title, payload = excluded.payload, updated_at = excluded.updated_at
 `, project.ID, project.Title, string(raw), project.CreatedAt.Format(time.RFC3339), project.UpdatedAt.Format(time.RFC3339))
 	return err
+}
+
+func (s *Store) DeleteProject(id string) error {
+	result, err := s.db.Exec(`DELETE FROM projects WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 func (s *Store) GetSettings() (model.AppSettings, error) {

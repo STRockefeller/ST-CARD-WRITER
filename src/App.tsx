@@ -120,6 +120,23 @@ export function App() {
     },
   });
 
+  const deleteProject = useMutation({
+    mutationFn: (projectId: string) => api.deleteProject(projectId),
+    onSuccess(_, projectId) {
+      setAppError('');
+      const remaining = projectsQuery.data?.filter((project) => project.id !== projectId) ?? [];
+      if (activeId === projectId) {
+        setActiveId(remaining[0]?.id ?? '');
+        setDraft(null);
+      }
+      queryClient.invalidateQueries({ queryKey: ['projects'] });
+      queryClient.removeQueries({ queryKey: ['tokens', projectId] });
+    },
+    onError(error) {
+      setAppError(getErrorMessage(error));
+    },
+  });
+
   const runLLM = useMutation({
     mutationFn: () =>
       api.runLLM(draft!.id, conversationId, llmTemplate, settingsQuery.data?.promptLocale ?? 'zh-TW', llmInput),
@@ -192,6 +209,12 @@ export function App() {
     setLlmInput(buildFieldAIPrompt(target.label, currentValue, mode));
   };
 
+  const requestDeleteProject = (project: CardProject) => {
+    if (window.confirm(t('confirmDeleteProject', { title: project.title }))) {
+      deleteProject.mutate(project.id);
+    }
+  };
+
   const queryError = projectsQuery.error ?? settingsQuery.error;
   const queryErrorMessage = getErrorMessage(queryError);
   const visibleError = appError || (queryErrorMessage !== dismissedQueryError ? queryErrorMessage : '');
@@ -230,8 +253,30 @@ export function App() {
               key={project.id}
               onClick={() => setActiveId(project.id)}
             >
-              <strong>{project.title}</strong>
-              <span>{project.card.data.name || 'Unnamed'}</span>
+              <span className="project-text">
+                <strong>{project.title}</strong>
+                <span>{project.card.data.name || 'Unnamed'}</span>
+              </span>
+              <span
+                role="button"
+                tabIndex={0}
+                className="project-delete"
+                aria-label={t('deleteProject')}
+                title={t('deleteProject')}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  requestDeleteProject(project);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    requestDeleteProject(project);
+                  }
+                }}
+              >
+                <Trash2 size={14} />
+              </span>
             </button>
           ))}
         </div>
@@ -249,17 +294,17 @@ export function App() {
                 onChange={(event) => updateDraft((project) => (project.title = event.target.value))}
               />
               <div className="topbar-actions">
-                <button onClick={() => setSidebarCollapsed((value) => !value)}>
+                <button className="ghost" onClick={() => setSidebarCollapsed((value) => !value)}>
                   {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
                   {sidebarCollapsed ? t('showProjects') : t('hideProjects')}
                 </button>
-                <button onClick={() => saveProject.mutate(draft)} disabled={!isDirty}>
+                <button className="primary" onClick={() => saveProject.mutate(draft)} disabled={!isDirty}>
                   <Save size={16} /> {t('save')}
                 </button>
-                <button onClick={() => exportCard('download')}>
+                <button className="secondary strong" onClick={() => exportCard('download')}>
                   <Download size={16} /> {t('exportJson')}
                 </button>
-                <button onClick={() => exportCard('copy')}>
+                <button className="ghost" onClick={() => exportCard('copy')}>
                   <Clipboard size={16} /> {t('copyJson')}
                 </button>
               </div>
@@ -699,7 +744,7 @@ function LLMPanel(props: {
   };
   return (
     <section className="llm-layout">
-      <div className="stack">
+      <div className="stack llm-control-panel">
         <div className="discussion-bar">
           <label className="field">
             <span>{t('discussion')}</span>
@@ -733,7 +778,7 @@ function LLMPanel(props: {
           </div>
         )}
       </div>
-      <div className="history">
+      <div className="history llm-history-panel">
         <div className="history-head">
           <div>
             <h2>{t('history')}</h2>

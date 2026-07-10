@@ -123,6 +123,12 @@ func (s *Server) projectByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, project)
+	case http.MethodDelete:
+		if err := s.store.DeleteProject(id); err != nil {
+			writeError(w, err, http.StatusNotFound)
+			return
+		}
+		writeJSON(w, map[string]string{"ok": "true"})
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}

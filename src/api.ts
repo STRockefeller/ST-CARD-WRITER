@@ -21,6 +21,8 @@ export const api = {
     request<CardProject>('/api/projects', { method: 'POST', body: JSON.stringify({ title }) }),
   saveProject: (project: CardProject) =>
     request<CardProject>(`/api/projects/${project.id}`, { method: 'PUT', body: JSON.stringify(project) }),
+  deleteProject: (projectId: string) =>
+    request<{ ok: string }>(`/api/projects/${projectId}`, { method: 'DELETE' }),
   exportCard: (projectId: string) =>
     request<CharacterCardV2>(`/api/projects/${projectId}/export`, { method: 'POST' }),
   tokens: (projectId: string) => request<TokenBudget>(`/api/projects/${projectId}/tokens`),
