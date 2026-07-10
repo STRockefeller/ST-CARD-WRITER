@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "concurrently \"npm:dev:server\" \"npm:dev:web\"",
     "dev:web": "vite --host 127.0.0.1",
-    "dev:server": "go run ./cmd/server",
+    "dev:server": "set GOCACHE=%CD%\\.cache\\go-build&& go run ./cmd/server",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
     "test": "node test/translation-protection.test.mjs"
