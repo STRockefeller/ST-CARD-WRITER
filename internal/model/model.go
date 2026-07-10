@@ -3,16 +3,24 @@ package model
 import "time"
 
 type Project struct {
-	ID         string          `json:"id"`
-	Title      string          `json:"title"`
-	Card       Card            `json:"card"`
-	Lorebook   CharacterBook   `json:"lorebook"`
-	Settings   ProjectSettings `json:"settings"`
-	LLMHistory []LLMMessage    `json:"llmHistory"`
-	Reviews    []ReviewReport  `json:"reviews"`
-	Snapshots  []Snapshot      `json:"snapshots"`
-	CreatedAt  time.Time       `json:"createdAt"`
-	UpdatedAt  time.Time       `json:"updatedAt"`
+	ID           string          `json:"id"`
+	Title        string          `json:"title"`
+	Card         Card            `json:"card"`
+	Lorebook     CharacterBook   `json:"lorebook"`
+	Settings     ProjectSettings `json:"settings"`
+	LLMHistory   []LLMMessage    `json:"llmHistory"`
+	Reviews      []ReviewReport  `json:"reviews"`
+	Snapshots    []Snapshot      `json:"snapshots"`
+	ImageDataURL string          `json:"imageDataUrl,omitempty"`
+	ImageCrop    ImageCrop       `json:"imageCrop"`
+	CreatedAt    time.Time       `json:"createdAt"`
+	UpdatedAt    time.Time       `json:"updatedAt"`
+}
+
+type ImageCrop struct {
+	Zoom float64 `json:"zoom"`
+	X    float64 `json:"x"`
+	Y    float64 `json:"y"`
 }
 
 type ProjectSettings struct {
@@ -116,6 +124,10 @@ type Snapshot struct {
 type AppSettings struct {
 	DeepSeekAPIKey string `json:"deepseekApiKey,omitempty"`
 	DeepSeekModel  string `json:"deepseekModel"`
+	LLMProvider    string `json:"llmProvider"`
+	LLMAPIKey      string `json:"llmApiKey,omitempty"`
+	LLMModel       string `json:"llmModel"`
+	LLMBaseURL     string `json:"llmBaseUrl,omitempty"`
 	UILocale       string `json:"uiLocale"`
 	PromptLocale   string `json:"promptLocale"`
 }
@@ -153,6 +165,7 @@ func NewProject(title string) Project {
 		LLMHistory: []LLMMessage{},
 		Reviews:    []ReviewReport{},
 		Snapshots:  []Snapshot{},
+		ImageCrop:  ImageCrop{Zoom: 1, X: 0, Y: 0},
 		CreatedAt:  now,
 		UpdatedAt:  now,
 	}

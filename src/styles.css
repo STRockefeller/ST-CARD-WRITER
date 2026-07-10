@@ -445,6 +445,77 @@ button:disabled {
   gap: 14px;
 }
 
+.card-image-panel {
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr);
+  gap: 16px;
+  align-items: center;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: 12px;
+  padding: 14px;
+  box-shadow: var(--shadow-soft);
+}
+
+.card-image-preview,
+.card-image-placeholder {
+  width: 132px;
+  aspect-ratio: 2 / 3;
+  border-radius: 8px;
+  background: #e9efeb;
+}
+
+.card-image-preview {
+  overflow: hidden;
+}
+
+.card-image-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transform-origin: center;
+}
+
+.card-image-placeholder {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.card-image-panel > div:last-child {
+  display: grid;
+  gap: 7px;
+}
+
+.card-image-panel p {
+  margin: 0;
+}
+
+.crop-controls {
+  display: grid;
+  gap: 6px;
+  margin-top: 5px;
+}
+
+.crop-controls label {
+  display: grid;
+  grid-template-columns: 92px minmax(120px, 1fr);
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.crop-controls input[type="range"] {
+  width: 100%;
+  accent-color: var(--brand);
+}
+
 .compact-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(160px, 1fr));
@@ -990,5 +1061,21 @@ button:disabled {
 
   .editor-grid, .llm-layout, .budget-grid, .compact-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 560px) {
+  .card-image-panel {
+    grid-template-columns: 92px minmax(0, 1fr);
+  }
+
+  .card-image-preview,
+  .card-image-placeholder {
+    width: 92px;
+  }
+
+  .crop-controls label {
+    grid-template-columns: 1fr;
+    gap: 2px;
   }
 }

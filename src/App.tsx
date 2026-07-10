@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BookOpen, Brain, CheckCircle2, ChevronDown, Clipboard, Download, FileJson, Image, Languages, PanelLeftClose, PanelLeftOpen, Plus, Save, Settings, Sparkles, Trash2, UserRound, WandSparkles, X } from 'lucide-react';
+import { BookOpen, Brain, CheckCircle2, ChevronDown, Clipboard, Download, FileJson, Image, ImageUp, Languages, PanelLeftClose, PanelLeftOpen, Plus, Save, Settings, Sparkles, Trash2, UserRound, WandSparkles, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { api } from './api';
 import type { AppSettings, CardProject, CharacterBook, CharacterCardV2, LorebookEntry } from './types';
@@ -9,6 +9,14 @@ import i18n from './i18n';
 const brainstormTemplates = ['brainstorm', 'revise_card', 'generate_card', 'generate_lorebook', 'field_rewrite'];
 const reviewTemplates = ['review', 'translate', 'compress', 'mvu'];
 const reviewFocusOptions = ['overall', 'llm_clarity', 'play_experience', 'token_budget', 'lorebook', 'mvu'];
+const providerDefaults: Record<AppSettings['llmProvider'], string> = {
+  deepseek: 'deepseek-v4-flash',
+  openai: 'gpt-4.1-mini',
+  openrouter: 'openai/gpt-4.1-mini',
+  anthropic: 'claude-sonnet-4-20250514',
+  gemini: 'gemini-2.5-flash',
+  custom: '',
+};
 const templateLabels: Record<string, string> = {
   brainstorm: 'templateBrainstorm',
   revise_card: 'templateReviseCard',
@@ -126,7 +134,7 @@ export function App() {
   const importCard = useMutation({
     mutationFn: async (file: File) => {
       const parsed = await readCardFile(file);
-      return api.importCard(parsed?.data?.name ?? file.name.replace(/\.json$/i, ''), parsed);
+      return api.importCard(parsed.card?.data?.name ?? file.name.replace(/\.(json|png)$/i, ''), parsed.card, parsed.imageDataUrl);
     },
     onSuccess(project) {
       setAppError('');
@@ -241,7 +249,7 @@ export function App() {
     return Boolean(draft && saved && JSON.stringify(draft) !== JSON.stringify(saved));
   }, [draft, projectsQuery.data]);
 
-  const exportCard = async (mode: 'download' | 'copy') => {
+  const exportCard = async (mode: 'download' | 'copy' | 'png') => {
     if (!draft) return;
     try {
       const card = buildExportCard(draft);
@@ -250,6 +258,13 @@ export function App() {
       if (mode === 'copy') {
         await navigator.clipboard.writeText(json);
         setExportStatus(t('exportCopied'));
+        return;
+      }
+      if (mode === 'png') {
+        if (!draft.imageDataUrl) throw new Error(t('pngImageRequired'));
+        const png = await buildPngCard(draft.imageDataUrl, draft.imageCrop, card);
+        downloadBlob(new Blob([png], { type: 'image/png' }), filename.replace(/\.json$/i, '.png'));
+        setExportStatus(t('pngExported'));
         return;
       }
       const blob = new Blob([json], { type: 'application/json' });
@@ -403,6 +418,9 @@ export function App() {
                 <button className="secondary strong" onClick={() => exportCard('download')}>
                   <Download size={16} /> {t('exportJson')}
                 </button>
+                <button className="secondary strong" onClick={() => exportCard('png')} disabled={!draft.imageDataUrl} title={!draft.imageDataUrl ? t('pngImageRequired') : t('exportPng')}>
+                  <Image size={16} /> {t('exportPng')}
+                </button>
                 <button className="ghost" onClick={() => exportCard('copy')}>
                   <Clipboard size={16} /> {t('copyJson')}
                 </button>
@@ -552,7 +570,7 @@ function buildExportCard(project: CardProject): CharacterCardV2 {
   const card = structuredClone(project.card);
   card.spec = 'chara_card_v2';
   card.spec_version = card.spec_version || '2.0';
-  if (project.settings.embedLorebook) {
+  if (project.settings.embedLorebook && project.lorebook.entries.length > 0) {
     card.data.character_book = {
       ...structuredClone(project.lorebook),
       token_budget: project.settings.lorebookBudget,
@@ -622,7 +640,14 @@ function CardEditor({
   updateDraft: (updater: (project: CardProject) => void) => void;
   startFieldAI: (target: FieldTarget, value: unknown, mode: 'discuss' | 'revise') => void;
 }) {
+  const { t } = useTranslation();
+  const imageRef = useRef<HTMLInputElement>(null);
   const data = project.card.data;
+  const crop = {
+    zoom: project.imageCrop?.zoom && project.imageCrop.zoom >= 1 ? project.imageCrop.zoom : 1,
+    x: project.imageCrop?.x ?? 0,
+    y: project.imageCrop?.y ?? 0,
+  };
   const setData = (key: keyof typeof data, value: unknown) => updateDraft((p) => ((p.card.data as any)[key] = value));
   const aiProps = (key: keyof typeof data, label: string, value: unknown) => ({
     onDiscuss: () => startFieldAI({ kind: 'card', key, label }, value, 'discuss' as const),
@@ -630,6 +655,52 @@ function CardEditor({
   });
   return (
     <section className="stack">
+      <section className="card-image-panel">
+        {project.imageDataUrl ? (
+          <div className="card-image-preview">
+            <img
+              src={project.imageDataUrl}
+              alt={data.name || t('cardImage')}
+              style={{
+                objectPosition: `${50 + crop.x * 50}% ${50 + crop.y * 50}%`,
+                transform: `scale(${crop.zoom})`,
+              }}
+            />
+          </div>
+        ) : (
+          <div className="card-image-placeholder"><Image size={28} /><span>{t('noCardImage')}</span></div>
+        )}
+        <div>
+          <strong>{t('cardImage')}</strong>
+          <p className="hint">{t('cardImageHint')}</p>
+          <div className="row-actions">
+            <button onClick={() => imageRef.current?.click()}><ImageUp size={16} /> {t(project.imageDataUrl ? 'replaceImage' : 'chooseImage')}</button>
+            {project.imageDataUrl && <button className="danger" onClick={() => updateDraft((p) => { delete p.imageDataUrl; p.imageCrop = { zoom: 1, x: 0, y: 0 }; })}><Trash2 size={15} /> {t('removeImage')}</button>}
+          </div>
+          {project.imageDataUrl && (
+            <div className="crop-controls">
+              <label><span>{t('imageZoom')}</span><input type="range" min="1" max="3" step="0.01" value={crop.zoom} onChange={(event) => updateDraft((p) => { p.imageCrop = { ...(p.imageCrop ?? { zoom: 1, x: 0, y: 0 }), zoom: Number(event.target.value) }; })} /></label>
+              <label><span>{t('imageHorizontal')}</span><input type="range" min="-1" max="1" step="0.01" value={crop.x} onChange={(event) => updateDraft((p) => { p.imageCrop = { ...(p.imageCrop ?? { zoom: 1, x: 0, y: 0 }), x: Number(event.target.value) }; })} /></label>
+              <label><span>{t('imageVertical')}</span><input type="range" min="-1" max="1" step="0.01" value={crop.y} onChange={(event) => updateDraft((p) => { p.imageCrop = { ...(p.imageCrop ?? { zoom: 1, x: 0, y: 0 }), y: Number(event.target.value) }; })} /></label>
+              <button className="ghost inline" onClick={() => updateDraft((p) => { p.imageCrop = { zoom: 1, x: 0, y: 0 }; })}>{t('resetCrop')}</button>
+            </div>
+          )}
+          <input
+            ref={imageRef}
+            hidden
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/gif,image/bmp,.png,.jpg,.jpeg,.webp,.gif,.bmp"
+            onChange={async (event) => {
+              const file = event.target.files?.[0];
+              if (file) {
+                const imageDataUrl = await fileToDataURL(file);
+                updateDraft((p) => { p.imageDataUrl = imageDataUrl; p.imageCrop = { zoom: 1, x: 0, y: 0 }; });
+              }
+              event.target.value = '';
+            }}
+          />
+        </div>
+      </section>
       <VersionHistory project={project} updateDraft={updateDraft} />
       <div className="editor-grid">
         <TextField label="name" value={data.name} onChange={(value) => setData('name', value)} {...aiProps('name', 'card.data.name', data.name)} />
@@ -1499,14 +1570,29 @@ function ProjectSettingsPanel({
       </section>
       <section className="settings-group">
         <h2>{t('llmSettings')}</h2>
-        <TextField label={t('apiKey')} value={draft.deepseekApiKey ?? ''} onChange={(value) => setDraft({ ...draft, deepseekApiKey: value })} />
         <label className="field">
-          <span>{t('model')}</span>
-          <select value={draft.deepseekModel} onChange={(event) => setDraft({ ...draft, deepseekModel: event.target.value })}>
-            <option value="deepseek-v4-flash">deepseek-v4-flash</option>
-            <option value="deepseek-v4-pro">deepseek-v4-pro</option>
+          <span>{t('llmProvider')}</span>
+          <select
+            value={draft.llmProvider ?? 'deepseek'}
+            onChange={(event) => {
+              const provider = event.target.value as AppSettings['llmProvider'];
+              setDraft({ ...draft, llmProvider: provider, llmModel: providerDefaults[provider], llmBaseUrl: provider === 'custom' ? draft.llmBaseUrl : '' });
+            }}
+          >
+            <option value="deepseek">DeepSeek</option>
+            <option value="openai">OpenAI</option>
+            <option value="openrouter">OpenRouter</option>
+            <option value="anthropic">Anthropic</option>
+            <option value="gemini">Google Gemini</option>
+            <option value="custom">{t('customCompatible')}</option>
           </select>
         </label>
+        <TextField label={t('apiKey')} value={draft.llmApiKey ?? ''} onChange={(value) => setDraft({ ...draft, llmApiKey: value })} />
+        <label className="field">
+          <span>{t('model')}</span>
+          <input value={draft.llmModel ?? ''} onChange={(event) => setDraft({ ...draft, llmModel: event.target.value })} placeholder={t('modelPlaceholder')} />
+        </label>
+        {draft.llmProvider === 'custom' && <TextField label={t('baseUrl')} value={draft.llmBaseUrl ?? ''} onChange={(value) => setDraft({ ...draft, llmBaseUrl: value })} />}
         <label className="field">
           <span>{t('uiLanguage')}</span>
           <select value={draft.uiLocale} onChange={(event) => setDraft({ ...draft, uiLocale: event.target.value as any })}>
@@ -1694,15 +1780,149 @@ function parseJSON(value: string) {
 
 async function readCardFile(file: File) {
   if (file.type === 'image/png' || file.name.toLowerCase().endsWith('.png')) {
-    const chunks = parsePngTextChunks(await file.arrayBuffer());
+    const buffer = await file.arrayBuffer();
+    const chunks = parsePngTextChunks(buffer);
     const chara = chunks.chara ?? chunks.Chara;
     if (!chara) {
       throw new Error('PNG metadata does not contain a SillyTavern chara chunk.');
     }
     const decoded = new TextDecoder().decode(base64ToBytes(chara));
-    return JSON.parse(decoded);
+    return { card: JSON.parse(decoded) as CharacterCardV2, imageDataUrl: await fileToDataURL(file) };
   }
-  return JSON.parse(await file.text());
+  return { card: JSON.parse(await file.text()) as CharacterCardV2, imageDataUrl: undefined };
+}
+
+function fileToDataURL(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error ?? new Error('Unable to read image.'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const href = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = href;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(href);
+}
+
+async function buildPngCard(imageDataUrl: string, crop: CardProject['imageCrop'], card: CharacterCardV2) {
+  const source = await renderImageAsPng(imageDataUrl, crop ?? { zoom: 1, x: 0, y: 0 });
+  const signature = source.slice(0, 8);
+  if (![137, 80, 78, 71, 13, 10, 26, 10].every((value, index) => signature[index] === value)) {
+    throw new Error('Card image must be a PNG file.');
+  }
+  const output: Uint8Array[] = [signature];
+  let offset = 8;
+  while (offset + 12 <= source.length) {
+    const length = readUint32(source, offset);
+    const type = new TextDecoder().decode(source.slice(offset + 4, offset + 8));
+    const data = source.slice(offset + 8, offset + 8 + length);
+    const chunkEnd = offset + 12 + length;
+    const keywordEnd = data.indexOf(0);
+    const keyword = keywordEnd >= 0 ? new TextDecoder().decode(data.slice(0, keywordEnd)).toLowerCase() : '';
+    if (type === 'IEND') {
+      const encoded = new TextEncoder().encode(JSON.stringify(card));
+      const metadata = concatBytes(new TextEncoder().encode('chara\0'), new TextEncoder().encode(bytesToBase64(encoded)));
+      output.push(createPngChunk('tEXt', metadata));
+      output.push(source.slice(offset, chunkEnd));
+      break;
+    }
+    if (!((type === 'tEXt' || type === 'iTXt') && keyword === 'chara')) {
+      output.push(source.slice(offset, chunkEnd));
+    }
+    offset = chunkEnd;
+  }
+  return concatBytes(...output);
+}
+
+async function renderImageAsPng(imageDataUrl: string, crop: { zoom: number; x: number; y: number }) {
+  const image = await loadImage(imageDataUrl);
+  const outputHeight = Math.max(2, Math.min(1536, image.naturalHeight));
+  const outputWidth = Math.max(2, Math.round(outputHeight * 2 / 3));
+  const canvas = document.createElement('canvas');
+  canvas.width = outputWidth;
+  canvas.height = outputHeight;
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('Canvas is unavailable.');
+
+  const baseScale = Math.max(outputWidth / image.naturalWidth, outputHeight / image.naturalHeight);
+  const scale = baseScale * Math.max(1, crop.zoom || 1);
+  const drawnWidth = image.naturalWidth * scale;
+  const drawnHeight = image.naturalHeight * scale;
+  const overflowX = Math.max(0, drawnWidth - outputWidth);
+  const overflowY = Math.max(0, drawnHeight - outputHeight);
+  const x = -overflowX * ((Math.max(-1, Math.min(1, crop.x || 0)) + 1) / 2);
+  const y = -overflowY * ((Math.max(-1, Math.min(1, crop.y || 0)) + 1) / 2);
+  context.drawImage(image, x, y, drawnWidth, drawnHeight);
+
+  const blob = await new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((value) => value ? resolve(value) : reject(new Error('Unable to convert image to PNG.')), 'image/png');
+  });
+  return new Uint8Array(await blob.arrayBuffer());
+}
+
+function loadImage(source: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new window.Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('Unable to decode the selected image.'));
+    image.src = source;
+  });
+}
+
+function createPngChunk(type: string, data: Uint8Array) {
+  const typeBytes = new TextEncoder().encode(type);
+  const chunk = new Uint8Array(12 + data.length);
+  new DataView(chunk.buffer).setUint32(0, data.length);
+  chunk.set(typeBytes, 4);
+  chunk.set(data, 8);
+  new DataView(chunk.buffer).setUint32(8 + data.length, crc32(concatBytes(typeBytes, data)));
+  return chunk;
+}
+
+function crc32(bytes: Uint8Array) {
+  let crc = 0xffffffff;
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function readUint32(bytes: Uint8Array, offset: number) {
+  return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(offset);
+}
+
+function dataUrlToBytes(value: string) {
+  const encoded = value.split(',', 2)[1];
+  if (!encoded) throw new Error('Invalid image data.');
+  return base64ToBytes(encoded);
+}
+
+function bytesToBase64(bytes: Uint8Array) {
+  let binary = '';
+  const batch = 0x8000;
+  for (let index = 0; index < bytes.length; index += batch) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + batch));
+  }
+  return btoa(binary);
+}
+
+function concatBytes(...parts: Uint8Array[]) {
+  const result = new Uint8Array(parts.reduce((total, part) => total + part.length, 0));
+  let offset = 0;
+  for (const part of parts) {
+    result.set(part, offset);
+    offset += part.length;
+  }
+  return result;
 }
 
 function parsePngTextChunks(buffer: ArrayBuffer) {

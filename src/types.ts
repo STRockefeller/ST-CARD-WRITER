@@ -9,6 +9,8 @@ export interface CardProject {
   llmHistory: LLMMessage[];
   reviews: ReviewReport[];
   snapshots: Snapshot[];
+  imageDataUrl?: string;
+  imageCrop?: { zoom: number; x: number; y: number };
   createdAt: string;
   updatedAt: string;
 }
@@ -112,8 +114,12 @@ export interface Snapshot {
 }
 
 export interface AppSettings {
-  deepseekApiKey: string;
-  deepseekModel: string;
+  deepseekApiKey?: string;
+  deepseekModel?: string;
+  llmProvider: 'deepseek' | 'openai' | 'openrouter' | 'anthropic' | 'gemini' | 'custom';
+  llmApiKey: string;
+  llmModel: string;
+  llmBaseUrl?: string;
   uiLocale: Locale;
   promptLocale: Locale;
 }

@@ -31,8 +31,8 @@ export const api = {
   getSettings: () => request<AppSettings>('/api/settings'),
   saveSettings: (settings: AppSettings) =>
     request<AppSettings>('/api/settings', { method: 'PUT', body: JSON.stringify(settings) }),
-  importCard: (title: string, card: CharacterCardV2) =>
-    request<CardProject>('/api/import', { method: 'POST', body: JSON.stringify({ title, card }) }),
+  importCard: (title: string, card: CharacterCardV2, imageDataUrl?: string) =>
+    request<CardProject>('/api/import', { method: 'POST', body: JSON.stringify({ title, card, imageDataUrl }) }),
   runLLM: (projectId: string, conversationId: string, template: string, locale: string, input: string) =>
     request<LLMMessage>('/api/llm', {
       method: 'POST',

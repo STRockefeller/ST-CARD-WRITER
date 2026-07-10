@@ -125,6 +125,8 @@ func (s *Store) DeleteProject(id string) error {
 func (s *Store) GetSettings() (model.AppSettings, error) {
 	settings := model.AppSettings{
 		DeepSeekModel: "deepseek-v4-flash",
+		LLMProvider:   "deepseek",
+		LLMModel:      "deepseek-v4-flash",
 		UILocale:      "zh-TW",
 		PromptLocale:  "zh-TW",
 	}
@@ -142,6 +144,15 @@ func (s *Store) GetSettings() (model.AppSettings, error) {
 	if settings.DeepSeekModel == "" {
 		settings.DeepSeekModel = "deepseek-v4-flash"
 	}
+	if settings.LLMProvider == "" {
+		settings.LLMProvider = "deepseek"
+	}
+	if settings.LLMAPIKey == "" {
+		settings.LLMAPIKey = settings.DeepSeekAPIKey
+	}
+	if settings.LLMModel == "" {
+		settings.LLMModel = settings.DeepSeekModel
+	}
 	if settings.UILocale == "" {
 		settings.UILocale = "zh-TW"
 	}
@@ -152,6 +163,16 @@ func (s *Store) GetSettings() (model.AppSettings, error) {
 }
 
 func (s *Store) SaveSettings(settings model.AppSettings) error {
+	if settings.LLMProvider == "" {
+		settings.LLMProvider = "deepseek"
+	}
+	if settings.LLMModel == "" {
+		settings.LLMModel = "deepseek-v4-flash"
+	}
+	if settings.LLMProvider == "deepseek" {
+		settings.DeepSeekAPIKey = settings.LLMAPIKey
+		settings.DeepSeekModel = settings.LLMModel
+	}
 	if settings.DeepSeekModel == "" {
 		settings.DeepSeekModel = "deepseek-v4-flash"
 	}

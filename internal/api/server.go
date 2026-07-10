@@ -153,7 +153,7 @@ func (s *Server) exportProject(w http.ResponseWriter, id string) {
 	if card.SpecVersion == "" {
 		card.SpecVersion = "2.0"
 	}
-	if project.Settings.EmbedLorebook {
+	if project.Settings.EmbedLorebook && len(project.Lorebook.Entries) > 0 {
 		book := project.Lorebook
 		book.TokenBudget = project.Settings.LorebookBudget
 		card.Data.CharacterBook = &book
@@ -213,6 +213,7 @@ func (s *Server) settings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		settings.DeepSeekAPIKey = mask(settings.DeepSeekAPIKey)
+		settings.LLMAPIKey = mask(settings.LLMAPIKey)
 		writeJSON(w, settings)
 	case http.MethodPut:
 		current, _ := s.store.GetSettings()
@@ -224,11 +225,15 @@ func (s *Server) settings(w http.ResponseWriter, r *http.Request) {
 		if incoming.DeepSeekAPIKey == "" || strings.Contains(incoming.DeepSeekAPIKey, "****") {
 			incoming.DeepSeekAPIKey = current.DeepSeekAPIKey
 		}
+		if incoming.LLMAPIKey == "" || strings.Contains(incoming.LLMAPIKey, "****") {
+			incoming.LLMAPIKey = current.LLMAPIKey
+		}
 		if err := s.store.SaveSettings(incoming); err != nil {
 			writeError(w, err, http.StatusInternalServerError)
 			return
 		}
 		incoming.DeepSeekAPIKey = mask(incoming.DeepSeekAPIKey)
+		incoming.LLMAPIKey = mask(incoming.LLMAPIKey)
 		writeJSON(w, incoming)
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -241,8 +246,9 @@ func (s *Server) importCard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Title string          `json:"title"`
-		Card  json.RawMessage `json:"card"`
+		Title        string          `json:"title"`
+		Card         json.RawMessage `json:"card"`
+		ImageDataURL string          `json:"imageDataUrl"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, err, http.StatusBadRequest)
@@ -259,6 +265,7 @@ func (s *Server) importCard(w http.ResponseWriter, r *http.Request) {
 	}
 	project := model.NewProject(title)
 	project.Card = card
+	project.ImageDataURL = body.ImageDataURL
 	if card.Data.CharacterBook != nil {
 		project.Lorebook = *card.Data.CharacterBook
 		project.Settings.EmbedLorebook = true
@@ -420,17 +427,17 @@ func (s *Server) llm(w http.ResponseWriter, r *http.Request) {
 		PriorMessages:  priorMessages,
 		ConversationID: conversationID,
 	})
-	log.Printf("llm request project=%s conversation=%s template=%s model=%s prompt_chars=%d input_chars=%d", project.ID, conversationID, body.Template, settings.DeepSeekModel, len(prompt), len(body.Input))
-	appendLLMLog("request", project.ID, conversationID, body.Template, settings.DeepSeekModel, body.Input, prompt, "")
-	response, err := llm.DeepSeekClient{APIKey: settings.DeepSeekAPIKey, Model: settings.DeepSeekModel}.Complete(prompt)
+	log.Printf("llm request project=%s conversation=%s template=%s provider=%s model=%s prompt_chars=%d input_chars=%d", project.ID, conversationID, body.Template, settings.LLMProvider, settings.LLMModel, len(prompt), len(body.Input))
+	appendLLMLog("request", project.ID, conversationID, body.Template, settings.LLMProvider+":"+settings.LLMModel, body.Input, prompt, "")
+	response, err := llmClient(settings).Complete(prompt)
 	if err != nil {
 		log.Printf("llm error project=%s conversation=%s template=%s error=%v", project.ID, conversationID, body.Template, err)
-		appendLLMLog("error", project.ID, conversationID, body.Template, settings.DeepSeekModel, body.Input, prompt, err.Error())
+		appendLLMLog("error", project.ID, conversationID, body.Template, settings.LLMProvider+":"+settings.LLMModel, body.Input, prompt, err.Error())
 		writeError(w, err, http.StatusBadGateway)
 		return
 	}
 	log.Printf("llm response project=%s conversation=%s template=%s response_chars=%d", project.ID, conversationID, body.Template, len(response))
-	appendLLMLog("response", project.ID, conversationID, body.Template, settings.DeepSeekModel, body.Input, prompt, response)
+	appendLLMLog("response", project.ID, conversationID, body.Template, settings.LLMProvider+":"+settings.LLMModel, body.Input, prompt, response)
 	message := model.LLMMessage{
 		ID:             "msg_" + time.Now().UTC().Format("20060102150405.000000000"),
 		ConversationID: conversationID,
@@ -470,14 +477,23 @@ func (s *Server) quickTool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	prompt := llm.BuildQuickToolPrompt(body.Tool, body.Locale, body.Project)
-	log.Printf("llm quick tool project=%s tool=%s model=%s prompt_chars=%d", body.Project.ID, body.Tool, settings.DeepSeekModel, len(prompt))
-	response, err := llm.DeepSeekClient{APIKey: settings.DeepSeekAPIKey, Model: settings.DeepSeekModel}.Complete(prompt)
+	log.Printf("llm quick tool project=%s tool=%s provider=%s model=%s prompt_chars=%d", body.Project.ID, body.Tool, settings.LLMProvider, settings.LLMModel, len(prompt))
+	response, err := llmClient(settings).Complete(prompt)
 	if err != nil {
 		log.Printf("llm quick tool error project=%s tool=%s error=%v", body.Project.ID, body.Tool, err)
 		writeError(w, err, http.StatusBadGateway)
 		return
 	}
 	writeJSON(w, map[string]string{"tool": body.Tool, "response": response})
+}
+
+func llmClient(settings model.AppSettings) llm.Client {
+	return llm.Client{
+		Provider: settings.LLMProvider,
+		APIKey:   settings.LLMAPIKey,
+		Model:    settings.LLMModel,
+		BaseURL:  settings.LLMBaseURL,
+	}
 }
 
 func appendLLMLog(kind string, projectID string, conversationID string, template string, modelName string, input string, prompt string, output string) {

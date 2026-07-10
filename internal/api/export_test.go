@@ -45,3 +45,31 @@ func TestExportEmbedsCharacterBookAndPreservesExtensions(t *testing.T) {
 		t.Fatalf("expected extension preservation, got %#v", card.Data.Extensions)
 	}
 }
+
+func TestExportOmitsEmptyCharacterBook(t *testing.T) {
+	dir := t.TempDir()
+	db, err := store.Open(filepath.Join(dir, "test.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	project := model.NewProject("Empty lore")
+	project.Card.Data.CharacterBook = &model.CharacterBook{Name: "stale embedded book"}
+	if err := db.SaveProject(project); err != nil {
+		t.Fatal(err)
+	}
+
+	server := NewServer(db)
+	req := httptest.NewRequest(http.MethodPost, "/api/projects/"+project.ID+"/export", nil)
+	res := httptest.NewRecorder()
+	server.Routes().ServeHTTP(res, req)
+
+	var card model.Card
+	if err := json.Unmarshal(res.Body.Bytes(), &card); err != nil {
+		t.Fatal(err)
+	}
+	if card.Data.CharacterBook != nil {
+		t.Fatal("expected empty character_book to be omitted")
+	}
+}
