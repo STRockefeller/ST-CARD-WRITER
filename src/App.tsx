@@ -38,6 +38,7 @@ export function App() {
   const [appError, setAppError] = useState('');
   const [dismissedQueryError, setDismissedQueryError] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
+  const activeProjectRef = useRef('');
 
   const projectsQuery = useQuery({ queryKey: ['projects'], queryFn: api.listProjects });
   const settingsQuery = useQuery({ queryKey: ['settings'], queryFn: api.getSettings });
@@ -50,8 +51,13 @@ export function App() {
 
   useEffect(() => {
     const project = projectsQuery.data?.find((item) => item.id === activeId) ?? null;
+    const activeProjectChanged = activeProjectRef.current !== activeId;
     setDraft(project ? structuredClone(project) : null);
-    setConversationId('default');
+    if (activeProjectChanged) {
+      activeProjectRef.current = activeId;
+      setConversationId('default');
+      setFieldTarget(null);
+    }
   }, [activeId, projectsQuery.data]);
 
   useEffect(() => {
