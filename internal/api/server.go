@@ -394,17 +394,18 @@ func (s *Server) llm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		ProjectID      string `json:"projectId"`
-		ConversationID string `json:"conversationId"`
-		Template       string `json:"template"`
-		Locale         string `json:"locale"`
-		Input          string `json:"input"`
+		ProjectID      string         `json:"projectId"`
+		Project        *model.Project `json:"project"`
+		ConversationID string         `json:"conversationId"`
+		Template       string         `json:"template"`
+		Locale         string         `json:"locale"`
+		Input          string         `json:"input"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, err, http.StatusBadRequest)
 		return
 	}
-	project, err := s.store.GetProject(body.ProjectID)
+	storedProject, err := s.store.GetProject(body.ProjectID)
 	if err != nil {
 		writeError(w, err, http.StatusNotFound)
 		return
@@ -418,26 +419,32 @@ func (s *Server) llm(w http.ResponseWriter, r *http.Request) {
 	if conversationID == "" {
 		conversationID = "default"
 	}
-	priorMessages := conversationMessages(project.LLMHistory, conversationID)
+	promptProject := storedProject
+	if body.Project != nil {
+		promptProject = *body.Project
+		promptProject.ID = storedProject.ID
+		promptProject.LLMHistory = storedProject.LLMHistory
+	}
+	priorMessages := conversationMessages(storedProject.LLMHistory, conversationID)
 	prompt := llm.BuildPrompt(llm.TemplateRequest{
 		Template:       body.Template,
 		Locale:         body.Locale,
 		Input:          body.Input,
-		Project:        project,
+		Project:        promptProject,
 		PriorMessages:  priorMessages,
 		ConversationID: conversationID,
 	})
-	log.Printf("llm request project=%s conversation=%s template=%s provider=%s model=%s prompt_chars=%d input_chars=%d", project.ID, conversationID, body.Template, settings.LLMProvider, settings.LLMModel, len(prompt), len(body.Input))
-	appendLLMLog("request", project.ID, conversationID, body.Template, settings.LLMProvider+":"+settings.LLMModel, body.Input, prompt, "")
+	log.Printf("llm request project=%s conversation=%s template=%s provider=%s model=%s prompt_chars=%d input_chars=%d", storedProject.ID, conversationID, body.Template, settings.LLMProvider, settings.LLMModel, len(prompt), len(body.Input))
+	appendLLMLog("request", storedProject.ID, conversationID, body.Template, settings.LLMProvider+":"+settings.LLMModel, body.Input, prompt, "")
 	response, err := llmClient(settings).Complete(prompt)
 	if err != nil {
-		log.Printf("llm error project=%s conversation=%s template=%s error=%v", project.ID, conversationID, body.Template, err)
-		appendLLMLog("error", project.ID, conversationID, body.Template, settings.LLMProvider+":"+settings.LLMModel, body.Input, prompt, err.Error())
+		log.Printf("llm error project=%s conversation=%s template=%s error=%v", storedProject.ID, conversationID, body.Template, err)
+		appendLLMLog("error", storedProject.ID, conversationID, body.Template, settings.LLMProvider+":"+settings.LLMModel, body.Input, prompt, err.Error())
 		writeError(w, err, http.StatusBadGateway)
 		return
 	}
-	log.Printf("llm response project=%s conversation=%s template=%s response_chars=%d", project.ID, conversationID, body.Template, len(response))
-	appendLLMLog("response", project.ID, conversationID, body.Template, settings.LLMProvider+":"+settings.LLMModel, body.Input, prompt, response)
+	log.Printf("llm response project=%s conversation=%s template=%s response_chars=%d", storedProject.ID, conversationID, body.Template, len(response))
+	appendLLMLog("response", storedProject.ID, conversationID, body.Template, settings.LLMProvider+":"+settings.LLMModel, body.Input, prompt, response)
 	message := model.LLMMessage{
 		ID:             "msg_" + time.Now().UTC().Format("20060102150405.000000000"),
 		ConversationID: conversationID,
@@ -448,8 +455,11 @@ func (s *Server) llm(w http.ResponseWriter, r *http.Request) {
 		Response:       response,
 		CreatedAt:      time.Now().UTC(),
 	}
-	project.LLMHistory = append([]model.LLMMessage{message}, project.LLMHistory...)
-	_ = s.store.SaveProject(project)
+	latestProject, latestErr := s.store.GetProject(storedProject.ID)
+	if latestErr == nil {
+		latestProject.LLMHistory = append([]model.LLMMessage{message}, latestProject.LLMHistory...)
+		_ = s.store.SaveProject(latestProject)
+	}
 	writeJSON(w, message)
 }
 

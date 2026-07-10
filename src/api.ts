@@ -33,10 +33,17 @@ export const api = {
     request<AppSettings>('/api/settings', { method: 'PUT', body: JSON.stringify(settings) }),
   importCard: (title: string, card: CharacterCardV2, imageDataUrl?: string) =>
     request<CardProject>('/api/import', { method: 'POST', body: JSON.stringify({ title, card, imageDataUrl }) }),
-  runLLM: (projectId: string, conversationId: string, template: string, locale: string, input: string) =>
+  runLLM: (project: CardProject, conversationId: string, template: string, locale: string, input: string) =>
     request<LLMMessage>('/api/llm', {
       method: 'POST',
-      body: JSON.stringify({ projectId, conversationId, template, locale, input }),
+      body: JSON.stringify({
+        projectId: project.id,
+        project: { ...project, imageDataUrl: undefined },
+        conversationId,
+        template,
+        locale,
+        input,
+      }),
     }),
   runQuickTool: (tool: 'user_persona' | 'cover_prompt', locale: string, project: CardProject) =>
     request<{ tool: string; response: string }>('/api/llm/quick-tool', {

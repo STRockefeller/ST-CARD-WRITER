@@ -72,9 +72,9 @@ export function App() {
   useEffect(() => {
     const project = projectsQuery.data?.find((item) => item.id === activeId) ?? null;
     const activeProjectChanged = activeProjectRef.current !== activeId;
-    setDraft(project ? structuredClone(project) : null);
     if (activeProjectChanged) {
       activeProjectRef.current = activeId;
+      setDraft(project ? structuredClone(project) : null);
       setConversationId('default');
       setFieldTarget(null);
     }
@@ -182,7 +182,7 @@ export function App() {
   const runLLM = useMutation({
     mutationFn: (request?: LLMRunRequest) =>
       api.runLLM(
-        draft!.id,
+        draft!,
         request?.conversationId ?? conversationId,
         request?.template ?? llmTemplate,
         settingsQuery.data?.promptLocale ?? 'zh-TW',
@@ -190,21 +190,24 @@ export function App() {
       ),
     onSuccess(message, request) {
       setAppError('');
-      if (request?.autoApplyFieldTarget) {
-        const code = firstCodeBlock(message.response) ?? message.response;
-        const saved = projectsQuery.data?.find((item) => item.id === draft?.id) ?? draft;
-        if (saved) {
-          const next = structuredClone(saved);
-          if (!next.llmHistory.some((item) => item.id === message.id)) {
-            next.llmHistory = [message, ...next.llmHistory];
-          }
+      queryClient.setQueryData<CardProject[]>(['projects'], (projects) => projects?.map((project) => {
+        if (project.id !== draft?.id || project.llmHistory.some((item) => item.id === message.id)) return project;
+        return { ...project, llmHistory: [message, ...project.llmHistory] };
+      }));
+      setDraft((current) => {
+        if (!current) return current;
+        const next = structuredClone(current);
+        if (!next.llmHistory.some((item) => item.id === message.id)) {
+          next.llmHistory = [message, ...next.llmHistory];
+        }
+        if (request?.autoApplyFieldTarget) {
+          const code = firstCodeBlock(message.response) ?? message.response;
           pushSnapshot(next, `Before AI rewrite ${request.autoApplyFieldTarget.label}`);
           applyFieldTarget(next, request.autoApplyFieldTarget, code);
-          setDraft(next);
           saveProject.mutate(next);
         }
-      }
-      queryClient.invalidateQueries({ queryKey: ['projects'] });
+        return next;
+      });
     },
     onError(error) {
       setAppError(getErrorMessage(error));
