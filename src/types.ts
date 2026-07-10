@@ -20,6 +20,9 @@ export interface ProjectSettings {
   permanentBudget: number;
   dynamicBudget: number;
   lorebookBudget: number;
+  writingStyle: string;
+  narrativePerson: string;
+  worldview: string;
 }
 
 export interface CharacterCardV2 {

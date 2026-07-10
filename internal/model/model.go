@@ -16,12 +16,15 @@ type Project struct {
 }
 
 type ProjectSettings struct {
-	EmbedLorebook             bool `json:"embedLorebook"`
-	IncludeSystemPromptTokens bool `json:"includeSystemPromptTokens"`
-	IncludePostHistoryTokens  bool `json:"includePostHistoryTokens"`
-	PermanentBudget           int  `json:"permanentBudget"`
-	DynamicBudget             int  `json:"dynamicBudget"`
-	LorebookBudget            int  `json:"lorebookBudget"`
+	EmbedLorebook             bool   `json:"embedLorebook"`
+	IncludeSystemPromptTokens bool   `json:"includeSystemPromptTokens"`
+	IncludePostHistoryTokens  bool   `json:"includePostHistoryTokens"`
+	PermanentBudget           int    `json:"permanentBudget"`
+	DynamicBudget             int    `json:"dynamicBudget"`
+	LorebookBudget            int    `json:"lorebookBudget"`
+	WritingStyle              string `json:"writingStyle"`
+	NarrativePerson           string `json:"narrativePerson"`
+	Worldview                 string `json:"worldview"`
 }
 
 type Card struct {
@@ -143,6 +146,9 @@ func NewProject(title string) Project {
 			PermanentBudget:           1200,
 			DynamicBudget:             1800,
 			LorebookBudget:            1024,
+			WritingStyle:              "",
+			NarrativePerson:           "",
+			Worldview:                 "",
 		},
 		LLMHistory: []LLMMessage{},
 		Reviews:    []ReviewReport{},

@@ -30,6 +30,7 @@ func BuildPrompt(req TemplateRequest) string {
 		"Respond in this locale: " + locale + ". For zh-TW, use natural Traditional Chinese.",
 		cardWritingRules(),
 		formatTokenBudget(req.Project),
+		formatCreativePreferences(req.Project.Settings),
 		selected,
 		formatPriorMessages(req.PriorMessages),
 		"\nCurrent card data:\n" + string(card),
@@ -39,6 +40,79 @@ func BuildPrompt(req TemplateRequest) string {
 		parts = append(parts, "\nUser request:\n"+req.Input)
 	}
 	return strings.Join(parts, "\n\n")
+}
+
+func formatCreativePreferences(settings model.ProjectSettings) string {
+	lines := []string{
+		"CREATIVE PREFERENCES:",
+		"- These preferences affect narrative prose, examples, first_mes, and alternate greetings.",
+		"- Do not write these preferences into system_prompt or post_history_instructions unless the user explicitly asks.",
+	}
+	if style := writingStyleInstruction(settings.WritingStyle); style != "" {
+		lines = append(lines, "- Writing style: "+style)
+	} else {
+		lines = append(lines, "- Writing style: unset; infer from the user's request and current card.")
+	}
+	if person := narrativePersonInstruction(settings.NarrativePerson); person != "" {
+		lines = append(lines, "- Narrative person: "+person)
+	} else {
+		lines = append(lines, "- Narrative person: unset; choose what best serves the card unless the user specifies.")
+	}
+	if worldview := worldviewInstruction(settings.Worldview); worldview != "" {
+		lines = append(lines, "- Worldview: "+worldview)
+	} else {
+		lines = append(lines, "- Worldview: unset; do not force a genre.")
+	}
+	return strings.Join(lines, "\n")
+}
+
+func writingStyleInstruction(value string) string {
+	switch value {
+	case "light_novel":
+		return "light novel style; vivid, accessible, emotionally immediate, character reactions and scene beats are clear."
+	case "prose":
+		return "literary prose; sensory, reflective, precise, with restrained but evocative imagery."
+	case "wuxia":
+		return "wuxia novel style; honor, restraint, martial atmosphere, poetic tension, and period-appropriate diction."
+	case "noir":
+		return "noir style; terse, atmospheric, morally shaded, with sharp observations and subtext."
+	case "comedy":
+		return "comedic style; playful timing and wit while preserving character consistency."
+	default:
+		return ""
+	}
+}
+
+func narrativePersonInstruction(value string) string {
+	switch value {
+	case "first":
+		return "first person; first_mes and greetings may use I/me for {{char}} while never controlling {{user}}."
+	case "second":
+		return "second person; address {{user}} as you, but do not assert {{user}}'s feelings, thoughts, or forced actions."
+	case "third":
+		return "third person; describe {{char}} externally with clear scene direction and avoid omniscient claims about {{user}}."
+	default:
+		return ""
+	}
+}
+
+func worldviewInstruction(value string) string {
+	switch value {
+	case "modern":
+		return "modern setting; contemporary social norms, technology, and everyday texture."
+	case "future":
+		return "future setting; plausible future technology, institutions, and social changes."
+	case "fantasy":
+		return "fantasy setting; magic, mythic rules, cultures, and concrete limits rather than vague wonder."
+	case "sci_fi":
+		return "science fiction setting; speculative systems, technology constraints, and world logic."
+	case "historical":
+		return "historical setting; period texture and constraints, avoiding modern anachronisms unless intentional."
+	case "parallel_world":
+		return "parallel-world setting; familiar baseline with one or more concrete divergences that affect play."
+	default:
+		return ""
+	}
 }
 
 func formatTokenBudget(project model.Project) string {

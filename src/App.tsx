@@ -18,6 +18,11 @@ const templateLabels: Record<string, string> = {
   mvu: 'templateMvu',
 };
 
+type FieldTarget =
+  | { kind: 'card'; key: keyof CardProject['card']['data']; label: string }
+  | { kind: 'lorebook'; key: keyof CharacterBook; label: string }
+  | { kind: 'loreEntry'; index: number; key: keyof LorebookEntry; label: string };
+
 export function App() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
@@ -28,6 +33,7 @@ export function App() {
   const [llmTemplate, setLlmTemplate] = useState('brainstorm');
   const [conversationId, setConversationId] = useState('default');
   const [exportStatus, setExportStatus] = useState('');
+  const [fieldTarget, setFieldTarget] = useState<FieldTarget | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const projectsQuery = useQuery({ queryKey: ['projects'], queryFn: api.listProjects });
@@ -150,6 +156,15 @@ export function App() {
     }
   };
 
+  const startFieldAI = (target: FieldTarget, value: unknown, mode: 'discuss' | 'revise') => {
+    setFieldTarget(target);
+    setTab('brainstorm');
+    setLlmTemplate('brainstorm');
+    setConversationId(`field_${target.kind}_${Date.now()}`);
+    const currentValue = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+    setLlmInput(buildFieldAIPrompt(target.label, currentValue, mode));
+  };
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -239,10 +254,12 @@ export function App() {
                 conversationId={conversationId}
                 setConversationId={setConversationId}
                 templates={brainstormTemplates}
+                fieldTarget={fieldTarget}
+                clearFieldTarget={() => setFieldTarget(null)}
               />
             )}
-            {tab === 'card' && <CardEditor project={draft} updateDraft={updateDraft} />}
-            {tab === 'lorebook' && <LorebookEditor project={draft} updateDraft={updateDraft} />}
+            {tab === 'card' && <CardEditor project={draft} updateDraft={updateDraft} startFieldAI={startFieldAI} />}
+            {tab === 'lorebook' && <LorebookEditor project={draft} updateDraft={updateDraft} startFieldAI={startFieldAI} />}
             {tab === 'tokens' && <TokenPanel project={draft} tokenData={countDraftBudget(draft)} updateDraft={updateDraft} />}
             {tab === 'review' && (
               <LLMPanel
@@ -258,10 +275,12 @@ export function App() {
                 conversationId={conversationId}
                 setConversationId={setConversationId}
                 templates={reviewTemplates}
+                fieldTarget={fieldTarget}
+                clearFieldTarget={() => setFieldTarget(null)}
               />
             )}
             {tab === 'settings' && settingsDraft && (
-              <SettingsPanel settings={settingsDraft} save={(next) => saveSettings.mutate(next)} />
+              <ProjectSettingsPanel settings={settingsDraft} project={draft} updateDraft={updateDraft} save={(next) => saveSettings.mutate(next)} />
             )}
           </>
         )}
@@ -294,10 +313,25 @@ function Tab(props: { id: string; label: string; icon: JSX.Element; active: stri
   );
 }
 
-function TextField(props: { label: string; value: string; onChange: (value: string) => void; rows?: number }) {
+function TextField(props: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  rows?: number;
+  onDiscuss?: () => void;
+  onRevise?: () => void;
+}) {
   return (
     <label className="field">
-      <span>{props.label}</span>
+      <span className="field-title">
+        {props.label}
+        {(props.onDiscuss || props.onRevise) && (
+          <span className="field-ai-actions">
+            {props.onDiscuss && <button type="button" onClick={props.onDiscuss}>AI 討論</button>}
+            {props.onRevise && <button type="button" onClick={props.onRevise}>AI 改寫</button>}
+          </span>
+        )}
+      </span>
       {props.rows ? (
         <textarea rows={props.rows} value={props.value} onChange={(event) => props.onChange(event.target.value)} />
       ) : (
@@ -307,28 +341,41 @@ function TextField(props: { label: string; value: string; onChange: (value: stri
   );
 }
 
-function CardEditor({ project, updateDraft }: { project: CardProject; updateDraft: (updater: (project: CardProject) => void) => void }) {
+function CardEditor({
+  project,
+  updateDraft,
+  startFieldAI,
+}: {
+  project: CardProject;
+  updateDraft: (updater: (project: CardProject) => void) => void;
+  startFieldAI: (target: FieldTarget, value: unknown, mode: 'discuss' | 'revise') => void;
+}) {
   const data = project.card.data;
   const setData = (key: keyof typeof data, value: unknown) => updateDraft((p) => ((p.card.data as any)[key] = value));
+  const aiProps = (key: keyof typeof data, label: string, value: unknown) => ({
+    onDiscuss: () => startFieldAI({ kind: 'card', key, label }, value, 'discuss' as const),
+    onRevise: () => startFieldAI({ kind: 'card', key, label }, value, 'revise' as const),
+  });
   return (
     <section className="stack">
       <VersionHistory project={project} updateDraft={updateDraft} />
       <div className="editor-grid">
-        <TextField label="name" value={data.name} onChange={(value) => setData('name', value)} />
+        <TextField label="name" value={data.name} onChange={(value) => setData('name', value)} {...aiProps('name', 'card.data.name', data.name)} />
         <TextField label="creator" value={data.creator} onChange={(value) => setData('creator', value)} />
         <TextField label="character_version" value={data.character_version} onChange={(value) => setData('character_version', value)} />
         <TextField label="tags" value={data.tags.join(', ')} onChange={(value) => setData('tags', splitCommaList(value))} />
-        <TextField label="description" value={data.description} rows={8} onChange={(value) => setData('description', value)} />
-        <TextField label="personality" value={data.personality} rows={8} onChange={(value) => setData('personality', value)} />
-        <TextField label="scenario" value={data.scenario} rows={7} onChange={(value) => setData('scenario', value)} />
-        <TextField label="first_mes" value={data.first_mes} rows={7} onChange={(value) => setData('first_mes', value)} />
-        <TextField label="mes_example" value={data.mes_example} rows={8} onChange={(value) => setData('mes_example', value)} />
-        <TextField label="creator_notes" value={data.creator_notes} rows={6} onChange={(value) => setData('creator_notes', value)} />
-        <TextField label="system_prompt" value={data.system_prompt} rows={6} onChange={(value) => setData('system_prompt', value)} />
-        <TextField label="post_history_instructions" value={data.post_history_instructions} rows={6} onChange={(value) => setData('post_history_instructions', value)} />
+        <TextField label="description" value={data.description} rows={8} onChange={(value) => setData('description', value)} {...aiProps('description', 'card.data.description', data.description)} />
+        <TextField label="personality" value={data.personality} rows={8} onChange={(value) => setData('personality', value)} {...aiProps('personality', 'card.data.personality', data.personality)} />
+        <TextField label="scenario" value={data.scenario} rows={7} onChange={(value) => setData('scenario', value)} {...aiProps('scenario', 'card.data.scenario', data.scenario)} />
+        <TextField label="first_mes" value={data.first_mes} rows={7} onChange={(value) => setData('first_mes', value)} {...aiProps('first_mes', 'card.data.first_mes', data.first_mes)} />
+        <TextField label="mes_example" value={data.mes_example} rows={8} onChange={(value) => setData('mes_example', value)} {...aiProps('mes_example', 'card.data.mes_example', data.mes_example)} />
+        <TextField label="creator_notes" value={data.creator_notes} rows={6} onChange={(value) => setData('creator_notes', value)} {...aiProps('creator_notes', 'card.data.creator_notes', data.creator_notes)} />
+        <TextField label="system_prompt" value={data.system_prompt} rows={6} onChange={(value) => setData('system_prompt', value)} {...aiProps('system_prompt', 'card.data.system_prompt', data.system_prompt)} />
+        <TextField label="post_history_instructions" value={data.post_history_instructions} rows={6} onChange={(value) => setData('post_history_instructions', value)} {...aiProps('post_history_instructions', 'card.data.post_history_instructions', data.post_history_instructions)} />
         <AlternativeGreetingsEditor
           greetings={data.alternate_greetings ?? []}
           onChange={(value) => setData('alternate_greetings', value)}
+          startFieldAI={startFieldAI}
         />
         <TextField label="data.extensions JSON" value={JSON.stringify(data.extensions ?? {}, null, 2)} rows={7} onChange={(value) => setData('extensions', parseJSON(value))} />
       </div>
@@ -336,7 +383,15 @@ function CardEditor({ project, updateDraft }: { project: CardProject; updateDraf
   );
 }
 
-function AlternativeGreetingsEditor({ greetings, onChange }: { greetings: string[]; onChange: (value: string[]) => void }) {
+function AlternativeGreetingsEditor({
+  greetings,
+  onChange,
+  startFieldAI,
+}: {
+  greetings: string[];
+  onChange: (value: string[]) => void;
+  startFieldAI: (target: FieldTarget, value: unknown, mode: 'discuss' | 'revise') => void;
+}) {
   const { t } = useTranslation();
   const update = (index: number, value: string) => {
     const next = [...greetings];
@@ -357,9 +412,13 @@ function AlternativeGreetingsEditor({ greetings, onChange }: { greetings: string
         <article className="alt-greeting" key={index}>
           <div>
             <strong>{t('greeting')} {index + 1}</strong>
-            <button className="danger" onClick={() => remove(index)}>
-              <Trash2 size={15} /> {t('deleteEntry')}
-            </button>
+            <span className="field-ai-actions">
+              <button type="button" onClick={() => startFieldAI({ kind: 'card', key: 'alternate_greetings', label: `card.data.alternate_greetings[${index}]` }, greeting, 'discuss')}>AI 討論</button>
+              <button type="button" onClick={() => startFieldAI({ kind: 'card', key: 'alternate_greetings', label: `card.data.alternate_greetings[${index}]` }, greeting, 'revise')}>AI 改寫</button>
+              <button className="danger" onClick={() => remove(index)}>
+                <Trash2 size={15} /> {t('deleteEntry')}
+              </button>
+            </span>
           </div>
           <textarea rows={6} value={greeting} onChange={(event) => update(index, event.target.value)} />
         </article>
@@ -368,9 +427,21 @@ function AlternativeGreetingsEditor({ greetings, onChange }: { greetings: string
   );
 }
 
-function LorebookEditor({ project, updateDraft }: { project: CardProject; updateDraft: (updater: (project: CardProject) => void) => void }) {
+function LorebookEditor({
+  project,
+  updateDraft,
+  startFieldAI,
+}: {
+  project: CardProject;
+  updateDraft: (updater: (project: CardProject) => void) => void;
+  startFieldAI: (target: FieldTarget, value: unknown, mode: 'discuss' | 'revise') => void;
+}) {
   const book = project.lorebook;
   const updateBook = (updater: (book: CharacterBook) => void) => updateDraft((p) => updater(p.lorebook));
+  const bookAI = (key: keyof CharacterBook, label: string, value: unknown) => ({
+    onDiscuss: () => startFieldAI({ kind: 'lorebook', key, label }, value, 'discuss' as const),
+    onRevise: () => startFieldAI({ kind: 'lorebook', key, label }, value, 'revise' as const),
+  });
   const addEntry = () =>
     updateBook((draft) => {
       const nextId = Math.max(0, ...draft.entries.map((entry) => entry.id)) + 1;
@@ -393,27 +464,41 @@ function LorebookEditor({ project, updateDraft }: { project: CardProject; update
   return (
     <section className="stack">
       <div className="compact-grid">
-        <TextField label="name" value={book.name} onChange={(value) => updateBook((b) => (b.name = value))} />
-        <TextField label="description" value={book.description} onChange={(value) => updateBook((b) => (b.description = value))} />
+        <TextField label="name" value={book.name} onChange={(value) => updateBook((b) => (b.name = value))} {...bookAI('name', 'lorebook.name', book.name)} />
+        <TextField label="description" value={book.description} onChange={(value) => updateBook((b) => (b.description = value))} {...bookAI('description', 'lorebook.description', book.description)} />
         <NumberField label="scan_depth" value={book.scan_depth} onChange={(value) => updateBook((b) => (b.scan_depth = value))} />
         <NumberField label="token_budget" value={book.token_budget} onChange={(value) => updateBook((b) => (b.token_budget = value))} />
       </div>
       <button className="primary inline" onClick={addEntry}><Plus size={16} /> Add Entry</button>
       <div className="entry-list">
         {book.entries.map((entry, index) => (
-          <LoreEntry key={entry.id} entry={entry} index={index} updateBook={updateBook} />
+          <LoreEntry key={entry.id} entry={entry} index={index} updateBook={updateBook} startFieldAI={startFieldAI} />
         ))}
       </div>
     </section>
   );
 }
 
-function LoreEntry({ entry, index, updateBook }: { entry: LorebookEntry; index: number; updateBook: (updater: (book: CharacterBook) => void) => void }) {
+function LoreEntry({
+  entry,
+  index,
+  updateBook,
+  startFieldAI,
+}: {
+  entry: LorebookEntry;
+  index: number;
+  updateBook: (updater: (book: CharacterBook) => void) => void;
+  startFieldAI: (target: FieldTarget, value: unknown, mode: 'discuss' | 'revise') => void;
+}) {
   const { t } = useTranslation();
   const updateEntry = (updater: (entry: LorebookEntry) => void) =>
     updateBook((book) => {
       updater(book.entries[index]);
     });
+  const entryAI = (key: keyof LorebookEntry, label: string, value: unknown) => ({
+    onDiscuss: () => startFieldAI({ kind: 'loreEntry', index, key, label }, value, 'discuss' as const),
+    onRevise: () => startFieldAI({ kind: 'loreEntry', index, key, label }, value, 'revise' as const),
+  });
   return (
     <article className="entry">
       <div className="entry-head">
@@ -429,8 +514,8 @@ function LoreEntry({ entry, index, updateBook }: { entry: LorebookEntry; index: 
         <TextField label="position" value={entry.position} onChange={(value) => updateEntry((e) => (e.position = value))} />
         <NumberField label="priority" value={entry.priority} onChange={(value) => updateEntry((e) => (e.priority = value))} />
       </div>
-      <TextField label="content" value={entry.content} rows={6} onChange={(value) => updateEntry((e) => (e.content = value))} />
-      <TextField label="comment" value={entry.comment} onChange={(value) => updateEntry((e) => (e.comment = value))} />
+      <TextField label="content" value={entry.content} rows={6} onChange={(value) => updateEntry((e) => (e.content = value))} {...entryAI('content', `lorebook.entries[${index}].content`, entry.content)} />
+      <TextField label="comment" value={entry.comment} onChange={(value) => updateEntry((e) => (e.comment = value))} {...entryAI('comment', `lorebook.entries[${index}].comment`, entry.comment)} />
     </article>
   );
 }
@@ -535,6 +620,8 @@ function LLMPanel(props: {
   conversationId: string;
   setConversationId: (value: string) => void;
   templates: string[];
+  fieldTarget: FieldTarget | null;
+  clearFieldTarget: () => void;
 }) {
   const { t } = useTranslation();
   const conversations = conversationOptions(props.project.llmHistory, props.conversationId);
@@ -544,6 +631,13 @@ function LLMPanel(props: {
     props.updateDraft((project) => {
       pushSnapshot(project, `Before applying ${props.template}`);
       applyCardPatch(project, parsed);
+    });
+  };
+  const applyFieldBlock = (code: string) => {
+    if (!props.fieldTarget) return;
+    props.updateDraft((project) => {
+      pushSnapshot(project, `Before applying ${props.fieldTarget?.label}`);
+      applyFieldTarget(project, props.fieldTarget!, code);
     });
   };
   return (
@@ -575,6 +669,12 @@ function LLMPanel(props: {
           <Sparkles size={16} /> {props.running ? '...' : t('run')}
         </button>
         <p className="hint">{t('generatedPromptNote')}</p>
+        {props.fieldTarget && (
+          <div className="field-target-banner">
+            <span>{t('activeFieldTarget')}: {props.fieldTarget.label}</span>
+            <button onClick={props.clearFieldTarget}>{t('clearFieldTarget')}</button>
+          </div>
+        )}
       </div>
       <div className="history">
         <div className="history-head">
@@ -604,7 +704,7 @@ function LLMPanel(props: {
           <article className="history-item" key={message.id}>
             <div><strong>{message.template}</strong><span>{new Date(message.createdAt).toLocaleString()}</span></div>
             {message.userInput && <blockquote>{message.userInput}</blockquote>}
-            <RichResponse text={message.response} onApply={applyCodeBlock} />
+            <RichResponse text={message.response} onApply={applyCodeBlock} onApplyField={props.fieldTarget ? applyFieldBlock : undefined} fieldLabel={props.fieldTarget?.label} />
           </article>
         ))}
       </div>
@@ -612,7 +712,17 @@ function LLMPanel(props: {
   );
 }
 
-function RichResponse({ text, onApply }: { text: string; onApply: (code: string) => void }) {
+function RichResponse({
+  text,
+  onApply,
+  onApplyField,
+  fieldLabel,
+}: {
+  text: string;
+  onApply: (code: string) => void;
+  onApplyField?: (code: string) => void;
+  fieldLabel?: string;
+}) {
   const { t } = useTranslation();
   const [status, setStatus] = useState('');
   const parts = splitCodeBlocks(text);
@@ -628,6 +738,14 @@ function RichResponse({ text, onApply }: { text: string; onApply: (code: string)
       setStatus(error instanceof Error ? error.message : 'Unable to apply JSON.');
     }
   };
+  const applyField = (code: string) => {
+    try {
+      onApplyField?.(code);
+      setStatus(t('appliedToField', { field: fieldLabel }));
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Unable to apply field content.');
+    }
+  };
   return (
     <div className="rich-response">
       {parts.map((part, index) => part.kind === 'code' ? (
@@ -637,6 +755,7 @@ function RichResponse({ text, onApply }: { text: string; onApply: (code: string)
             <div>
               <button onClick={() => copy(part.content)}>{t('copy')}</button>
               {isJsonLike(part.lang, part.content) && <button onClick={() => apply(part.content)}>{t('applyToCard')}</button>}
+              {onApplyField && <button onClick={() => applyField(part.content)}>{t('applyToField')}</button>}
             </div>
           </div>
           <pre>{part.content}</pre>
@@ -671,12 +790,111 @@ function safeFilename(value: string) {
   return (value || 'character-card').replace(/[\\/:*?"<>|]+/g, '_').trim() || 'character-card';
 }
 
-function SettingsPanel({ settings, save }: { settings: AppSettings; save: (settings: AppSettings) => void }) {
+function buildFieldAIPrompt(label: string, currentValue: string, mode: 'discuss' | 'revise') {
+  if (mode === 'discuss') {
+    return [
+      `請針對欄位 ${label} 展開討論。`,
+      '請先分析這個欄位目前是否足夠支援 SillyTavern 角色卡遊玩，指出缺口、風格問題、token 使用、和是否符合目前卡片整體方向。',
+      '請不要輸出整份 JSON，也不要改其他欄位。若你提出修正版，請只把此欄位的新內容放在單一 fenced code block 中。',
+      '',
+      '目前欄位內容：',
+      currentValue || '(empty)',
+    ].join('\n');
+  }
+  return [
+    `請只改寫欄位 ${label}。`,
+    '你必須參考完整角色卡、lorebook、創作偏好、token 預算與寫卡技巧，但輸出不得包含整份 JSON。',
+    '請先用 2-4 點簡短說明修改策略，然後輸出單一 fenced code block，code block 內只放此欄位應替換的新內容。',
+    '不要改寫其他欄位；不要包 JSON；不要加入欄位名稱。',
+    '',
+    '目前欄位內容：',
+    currentValue || '(empty)',
+  ].join('\n');
+}
+
+function applyFieldTarget(project: CardProject, target: FieldTarget, value: string) {
+  const clean = stripFieldFence(value);
+  if (target.kind === 'card') {
+    if (target.key === 'alternate_greetings') {
+      const match = target.label.match(/\[(\d+)\]/);
+      const index = match ? Number(match[1]) : -1;
+      if (index >= 0) {
+        const greetings = [...(project.card.data.alternate_greetings ?? [])];
+        greetings[index] = clean;
+        project.card.data.alternate_greetings = greetings;
+        return;
+      }
+    }
+    (project.card.data as any)[target.key] = clean;
+    return;
+  }
+  if (target.kind === 'lorebook') {
+    (project.lorebook as any)[target.key] = clean;
+    return;
+  }
+  if (target.kind === 'loreEntry') {
+    const entry = project.lorebook.entries[target.index];
+    if (entry) (entry as any)[target.key] = clean;
+  }
+}
+
+function stripFieldFence(value: string) {
+  return value.replace(/^```[a-zA-Z0-9_-]*\n?/, '').replace(/\n?```$/, '').trim();
+}
+
+function SettingsPanel({
+  settings,
+  project,
+  updateDraft,
+  save,
+}: {
+  settings: AppSettings;
+  project: CardProject;
+  updateDraft: (updater: (project: CardProject) => void) => void;
+  save: (settings: AppSettings) => void;
+}) {
   const { t } = useTranslation();
   const [draft, setDraft] = useState(settings);
   useEffect(() => setDraft(settings), [settings]);
   return (
     <section className="stack settings-panel">
+      <section className="settings-group">
+        <h2>{t('creativePreferences')}</h2>
+        <label className="field">
+          <span>{t('writingStyle')}</span>
+          <select value={project.settings.writingStyle ?? ''} onChange={(event) => updateDraft((p) => (p.settings.writingStyle = event.target.value))}>
+            <option value="">{t('unset')}</option>
+            <option value="light_novel">{t('styleLightNovel')}</option>
+            <option value="prose">{t('styleProse')}</option>
+            <option value="wuxia">{t('styleWuxia')}</option>
+            <option value="noir">{t('styleNoir')}</option>
+            <option value="comedy">{t('styleComedy')}</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>{t('narrativePerson')}</span>
+          <select value={project.settings.narrativePerson ?? ''} onChange={(event) => updateDraft((p) => (p.settings.narrativePerson = event.target.value))}>
+            <option value="">{t('unset')}</option>
+            <option value="first">{t('personFirst')}</option>
+            <option value="second">{t('personSecond')}</option>
+            <option value="third">{t('personThird')}</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>{t('worldview')}</span>
+          <select value={project.settings.worldview ?? ''} onChange={(event) => updateDraft((p) => (p.settings.worldview = event.target.value))}>
+            <option value="">{t('unset')}</option>
+            <option value="modern">{t('worldModern')}</option>
+            <option value="future">{t('worldFuture')}</option>
+            <option value="fantasy">{t('worldFantasy')}</option>
+            <option value="sci_fi">{t('worldSciFi')}</option>
+            <option value="historical">{t('worldHistorical')}</option>
+            <option value="parallel_world">{t('worldParallel')}</option>
+          </select>
+        </label>
+      </section>
+      <section className="settings-group">
+        <h2>{t('llmSettings')}</h2>
       <TextField label={t('apiKey')} value={draft.deepseekApiKey ?? ''} onChange={(value) => setDraft({ ...draft, deepseekApiKey: value })} />
       <label className="field">
         <span>{t('model')}</span>
@@ -700,6 +918,88 @@ function SettingsPanel({ settings, save }: { settings: AppSettings; save: (setti
         </select>
       </label>
       <button className="primary inline" onClick={() => save(draft)}><Save size={16} /> {t('save')}</button>
+      </section>
+    </section>
+  );
+}
+
+function ProjectSettingsPanel({
+  settings,
+  project,
+  updateDraft,
+  save,
+}: {
+  settings: AppSettings;
+  project: CardProject;
+  updateDraft: (updater: (project: CardProject) => void) => void;
+  save: (settings: AppSettings) => void;
+}) {
+  const { t } = useTranslation();
+  const [draft, setDraft] = useState(settings);
+  useEffect(() => setDraft(settings), [settings]);
+  return (
+    <section className="stack settings-panel">
+      <section className="settings-group">
+        <h2>{t('creativePreferences')}</h2>
+        <label className="field">
+          <span>{t('writingStyle')}</span>
+          <select value={project.settings.writingStyle ?? ''} onChange={(event) => updateDraft((p) => (p.settings.writingStyle = event.target.value))}>
+            <option value="">{t('unset')}</option>
+            <option value="light_novel">{t('styleLightNovel')}</option>
+            <option value="prose">{t('styleProse')}</option>
+            <option value="wuxia">{t('styleWuxia')}</option>
+            <option value="noir">{t('styleNoir')}</option>
+            <option value="comedy">{t('styleComedy')}</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>{t('narrativePerson')}</span>
+          <select value={project.settings.narrativePerson ?? ''} onChange={(event) => updateDraft((p) => (p.settings.narrativePerson = event.target.value))}>
+            <option value="">{t('unset')}</option>
+            <option value="first">{t('personFirst')}</option>
+            <option value="second">{t('personSecond')}</option>
+            <option value="third">{t('personThird')}</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>{t('worldview')}</span>
+          <select value={project.settings.worldview ?? ''} onChange={(event) => updateDraft((p) => (p.settings.worldview = event.target.value))}>
+            <option value="">{t('unset')}</option>
+            <option value="modern">{t('worldModern')}</option>
+            <option value="future">{t('worldFuture')}</option>
+            <option value="fantasy">{t('worldFantasy')}</option>
+            <option value="sci_fi">{t('worldSciFi')}</option>
+            <option value="historical">{t('worldHistorical')}</option>
+            <option value="parallel_world">{t('worldParallel')}</option>
+          </select>
+        </label>
+      </section>
+      <section className="settings-group">
+        <h2>{t('llmSettings')}</h2>
+        <TextField label={t('apiKey')} value={draft.deepseekApiKey ?? ''} onChange={(value) => setDraft({ ...draft, deepseekApiKey: value })} />
+        <label className="field">
+          <span>{t('model')}</span>
+          <select value={draft.deepseekModel} onChange={(event) => setDraft({ ...draft, deepseekModel: event.target.value })}>
+            <option value="deepseek-v4-flash">deepseek-v4-flash</option>
+            <option value="deepseek-v4-pro">deepseek-v4-pro</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>{t('uiLanguage')}</span>
+          <select value={draft.uiLocale} onChange={(event) => setDraft({ ...draft, uiLocale: event.target.value as any })}>
+            <option value="zh-TW">繁體中文</option>
+            <option value="en">English</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>{t('promptLanguage')}</span>
+          <select value={draft.promptLocale} onChange={(event) => setDraft({ ...draft, promptLocale: event.target.value as any })}>
+            <option value="zh-TW">繁體中文</option>
+            <option value="en">English</option>
+          </select>
+        </label>
+        <button className="primary inline" onClick={() => save(draft)}><Save size={16} /> {t('save')}</button>
+      </section>
     </section>
   );
 }
