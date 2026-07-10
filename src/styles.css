@@ -289,7 +289,42 @@ button:disabled {
 
 .history h2 {
   font-size: 16px;
-  margin: 0 0 10px;
+  margin: 0;
+}
+
+.discussion-bar, .history-head {
+  display: flex;
+  gap: 10px;
+  align-items: end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.discussion-bar .field {
+  flex: 1;
+  min-width: 210px;
+}
+
+.history-head {
+  margin-bottom: 10px;
+}
+
+.history-head div {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.history-head > div:first-child {
+  display: grid;
+  gap: 3px;
+  align-items: start;
+}
+
+.history-head span {
+  color: #65716c;
+  font-size: 12px;
 }
 
 .history-item {
@@ -309,6 +344,15 @@ button:disabled {
   white-space: pre-wrap;
   line-height: 1.5;
   margin: 0;
+}
+
+.history-item blockquote {
+  margin: 0 0 10px;
+  padding: 9px 11px;
+  border-left: 3px solid #8aa197;
+  background: #f5f7f3;
+  color: #40514b;
+  white-space: pre-wrap;
 }
 
 .rich-response {

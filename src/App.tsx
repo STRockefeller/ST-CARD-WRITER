@@ -16,15 +16,11 @@ export function App() {
   const [draft, setDraft] = useState<CardProject | null>(null);
   const [llmInput, setLlmInput] = useState('');
   const [llmTemplate, setLlmTemplate] = useState('brainstorm');
+  const [conversationId, setConversationId] = useState('default');
   const fileRef = useRef<HTMLInputElement>(null);
 
   const projectsQuery = useQuery({ queryKey: ['projects'], queryFn: api.listProjects });
   const settingsQuery = useQuery({ queryKey: ['settings'], queryFn: api.getSettings });
-  const tokenQuery = useQuery({
-    queryKey: ['tokens', draft?.id],
-    queryFn: () => api.tokens(draft!.id),
-    enabled: Boolean(draft?.id),
-  });
 
   useEffect(() => {
     if (!activeId && projectsQuery.data?.length) {
@@ -35,6 +31,7 @@ export function App() {
   useEffect(() => {
     const project = projectsQuery.data?.find((item) => item.id === activeId) ?? null;
     setDraft(project ? structuredClone(project) : null);
+    setConversationId('default');
   }, [activeId, projectsQuery.data]);
 
   useEffect(() => {
@@ -80,7 +77,7 @@ export function App() {
 
   const runLLM = useMutation({
     mutationFn: () =>
-      api.runLLM(draft!.id, llmTemplate, settingsQuery.data?.promptLocale ?? 'zh-TW', llmInput),
+      api.runLLM(draft!.id, conversationId, llmTemplate, settingsQuery.data?.promptLocale ?? 'zh-TW', llmInput),
     onSuccess() {
       queryClient.invalidateQueries({ queryKey: ['projects'] });
     },
@@ -94,6 +91,15 @@ export function App() {
       next.updatedAt = new Date().toISOString();
       return next;
     });
+  };
+
+  const commitDraft = (updater: (project: CardProject) => void) => {
+    if (!draft) return;
+    const next = structuredClone(draft);
+    updater(next);
+    next.updatedAt = new Date().toISOString();
+    setDraft(next);
+    saveProject.mutate(next);
   };
 
   const settingsDraft = settingsQuery.data;
@@ -186,11 +192,14 @@ export function App() {
                 running={runLLM.isLoading}
                 project={draft}
                 updateDraft={updateDraft}
+                commitDraft={commitDraft}
+                conversationId={conversationId}
+                setConversationId={setConversationId}
               />
             )}
             {tab === 'card' && <CardEditor project={draft} updateDraft={updateDraft} />}
             {tab === 'lorebook' && <LorebookEditor project={draft} updateDraft={updateDraft} />}
-            {tab === 'tokens' && <TokenPanel project={draft} tokenData={tokenQuery.data} updateDraft={updateDraft} />}
+            {tab === 'tokens' && <TokenPanel project={draft} tokenData={countDraftBudget(draft)} updateDraft={updateDraft} />}
             {tab === 'review' && (
               <LLMPanel
                 template={llmTemplate}
@@ -201,6 +210,9 @@ export function App() {
                 running={runLLM.isLoading}
                 project={draft}
                 updateDraft={updateDraft}
+                commitDraft={commitDraft}
+                conversationId={conversationId}
+                setConversationId={setConversationId}
               />
             )}
             {tab === 'settings' && settingsDraft && (
@@ -429,8 +441,13 @@ function LLMPanel(props: {
   running: boolean;
   project: CardProject;
   updateDraft: (updater: (project: CardProject) => void) => void;
+  commitDraft: (updater: (project: CardProject) => void) => void;
+  conversationId: string;
+  setConversationId: (value: string) => void;
 }) {
   const { t } = useTranslation();
+  const conversations = conversationOptions(props.project.llmHistory, props.conversationId);
+  const currentMessages = props.project.llmHistory.filter((message) => getConversationId(message) === props.conversationId);
   const applyCodeBlock = (code: string) => {
     const parsed = JSON.parse(code);
     props.updateDraft((project) => {
@@ -441,6 +458,21 @@ function LLMPanel(props: {
   return (
     <section className="llm-layout">
       <div className="stack">
+        <div className="discussion-bar">
+          <label className="field">
+            <span>{t('discussion')}</span>
+            <select value={props.conversationId} onChange={(event) => props.setConversationId(event.target.value)}>
+              {conversations.map((conversation) => (
+                <option value={conversation.id} key={conversation.id}>{conversation.label}</option>
+              ))}
+            </select>
+          </label>
+          <button
+            onClick={() => props.setConversationId(`conv_${Date.now()}`)}
+          >
+            <Plus size={16} /> {t('newDiscussion')}
+          </button>
+        </div>
         <label className="field">
           <span>template</span>
           <select value={props.template} onChange={(event) => props.setTemplate(event.target.value)}>
@@ -454,10 +486,33 @@ function LLMPanel(props: {
         <p className="hint">{t('generatedPromptNote')}</p>
       </div>
       <div className="history">
-        <h2>{t('history')}</h2>
-        {props.project.llmHistory.map((message) => (
+        <div className="history-head">
+          <div>
+            <h2>{t('history')}</h2>
+            <span>{t('currentDiscussion')}: {conversationLabel(props.conversationId)}</span>
+          </div>
+          <div>
+            <button
+              onClick={() => props.commitDraft((project) => {
+                project.llmHistory = project.llmHistory.filter((message) => getConversationId(message) !== props.conversationId);
+              })}
+            >
+              {t('clearCurrentDiscussion')}
+            </button>
+            <button
+              className="danger"
+              onClick={() => props.commitDraft((project) => {
+                project.llmHistory = [];
+              })}
+            >
+              {t('clearAllHistory')}
+            </button>
+          </div>
+        </div>
+        {currentMessages.map((message) => (
           <article className="history-item" key={message.id}>
             <div><strong>{message.template}</strong><span>{new Date(message.createdAt).toLocaleString()}</span></div>
+            {message.userInput && <blockquote>{message.userInput}</blockquote>}
             <RichResponse text={message.response} onApply={applyCodeBlock} />
           </article>
         ))}
@@ -501,6 +556,24 @@ function RichResponse({ text, onApply }: { text: string; onApply: (code: string)
       {status && <small className="response-status">{status}</small>}
     </div>
   );
+}
+
+function getConversationId(message: { conversationId?: string }) {
+  return message.conversationId || 'default';
+}
+
+function conversationOptions(messages: Array<{ conversationId?: string; createdAt: string }>, currentId: string) {
+  const ids = new Set<string>(['default', currentId || 'default']);
+  for (const message of messages) ids.add(getConversationId(message));
+  return Array.from(ids).map((id) => ({ id, label: conversationLabel(id) }));
+}
+
+function conversationLabel(id: string) {
+  if (id === 'default') return 'default';
+  const compact = id.replace(/^conv_/, '');
+  const timestamp = Number(compact);
+  if (Number.isFinite(timestamp)) return new Date(timestamp).toLocaleString();
+  return compact || 'default';
 }
 
 function SettingsPanel({ settings, save }: { settings: AppSettings; save: (settings: AppSettings) => void }) {
@@ -639,6 +712,50 @@ function diffSnapshot(project: CardProject, snapshot: CardProject['snapshots'][n
     diffs.push('lorebook.entries changed');
   }
   return diffs;
+}
+
+function countDraftBudget(project: CardProject) {
+  const card = project.card.data;
+  let permanent = estimateTokens([card.name, card.description, card.personality, card.scenario].join('\n'));
+  if (project.settings.includeSystemPromptTokens) permanent += estimateTokens(card.system_prompt);
+  if (project.settings.includePostHistoryTokens) permanent += estimateTokens(card.post_history_instructions);
+
+  let dynamic = estimateTokens([
+    card.first_mes,
+    card.mes_example,
+    ...(card.alternate_greetings ?? []),
+  ].join('\n'));
+
+  let lorebook = 0;
+  for (const entry of project.lorebook.entries) {
+    if (entry.enabled || entry.constant) {
+      lorebook += estimateTokens(entry.content);
+      lorebook += estimateTokens(entry.keys.join('\n'));
+      lorebook += estimateTokens(entry.secondary_keys.join('\n'));
+    }
+  }
+  dynamic += lorebook;
+
+  return {
+    permanent,
+    dynamic,
+    lorebook,
+    total: permanent + dynamic,
+    permanentBudget: project.settings.permanentBudget,
+    dynamicBudget: project.settings.dynamicBudget,
+    lorebookBudget: project.settings.lorebookBudget,
+    permanentOver: permanent > project.settings.permanentBudget,
+    dynamicOver: dynamic > project.settings.dynamicBudget,
+    lorebookOver: lorebook > project.settings.lorebookBudget,
+  };
+}
+
+function estimateTokens(text: string) {
+  if (!text) return 0;
+  const chars = Array.from(text);
+  const cjk = chars.filter((char) => /[\u4E00-\u9FFF\u3040-\u30FF\uAC00-\uD7AF]/u.test(char)).length;
+  const latin = chars.length - cjk;
+  return Math.max(1, Math.ceil((cjk * 10) / 17) + Math.ceil(latin / 4));
 }
 
 function splitCommaList(value: string) {

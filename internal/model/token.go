@@ -46,6 +46,9 @@ func CountBudget(project Project) TokenBudget {
 	}
 
 	dynamic := EstimateTokens(card.FirstMes + "\n" + card.MesExample)
+	for _, greeting := range card.AlternateGreetings {
+		dynamic += EstimateTokens(greeting)
+	}
 	lorebook := 0
 	for _, entry := range project.Lorebook.Entries {
 		if entry.Enabled || entry.Constant {

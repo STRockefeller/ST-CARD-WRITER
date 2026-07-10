@@ -75,8 +75,10 @@ export interface LorebookEntry {
 
 export interface LLMMessage {
   id: string;
+  conversationId: string;
   template: string;
   locale: string;
+  userInput: string;
   prompt: string;
   response: string;
   createdAt: string;

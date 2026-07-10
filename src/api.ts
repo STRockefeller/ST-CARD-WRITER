@@ -29,10 +29,10 @@ export const api = {
     request<AppSettings>('/api/settings', { method: 'PUT', body: JSON.stringify(settings) }),
   importCard: (title: string, card: CharacterCardV2) =>
     request<CardProject>('/api/import', { method: 'POST', body: JSON.stringify({ title, card }) }),
-  runLLM: (projectId: string, template: string, locale: string, input: string) =>
+  runLLM: (projectId: string, conversationId: string, template: string, locale: string, input: string) =>
     request<LLMMessage>('/api/llm', {
       method: 'POST',
-      body: JSON.stringify({ projectId, template, locale, input }),
+      body: JSON.stringify({ projectId, conversationId, template, locale, input }),
     }),
 };
 

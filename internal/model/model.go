@@ -76,12 +76,14 @@ type LorebookEntry struct {
 }
 
 type LLMMessage struct {
-	ID        string    `json:"id"`
-	Template  string    `json:"template"`
-	Locale    string    `json:"locale"`
-	Prompt    string    `json:"prompt"`
-	Response  string    `json:"response"`
-	CreatedAt time.Time `json:"createdAt"`
+	ID             string    `json:"id"`
+	ConversationID string    `json:"conversationId"`
+	Template       string    `json:"template"`
+	Locale         string    `json:"locale"`
+	UserInput      string    `json:"userInput"`
+	Prompt         string    `json:"prompt"`
+	Response       string    `json:"response"`
+	CreatedAt      time.Time `json:"createdAt"`
 }
 
 type ReviewReport struct {

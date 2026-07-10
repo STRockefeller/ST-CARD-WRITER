@@ -223,10 +223,11 @@ func (s *Server) llm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		ProjectID string `json:"projectId"`
-		Template  string `json:"template"`
-		Locale    string `json:"locale"`
-		Input     string `json:"input"`
+		ProjectID      string `json:"projectId"`
+		ConversationID string `json:"conversationId"`
+		Template       string `json:"template"`
+		Locale         string `json:"locale"`
+		Input          string `json:"input"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, err, http.StatusBadRequest)
@@ -242,11 +243,18 @@ func (s *Server) llm(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err, http.StatusInternalServerError)
 		return
 	}
+	conversationID := body.ConversationID
+	if conversationID == "" {
+		conversationID = "default"
+	}
+	priorMessages := conversationMessages(project.LLMHistory, conversationID)
 	prompt := llm.BuildPrompt(llm.TemplateRequest{
-		Template: body.Template,
-		Locale:   body.Locale,
-		Input:    body.Input,
-		Project:  project,
+		Template:       body.Template,
+		Locale:         body.Locale,
+		Input:          body.Input,
+		Project:        project,
+		PriorMessages:  priorMessages,
+		ConversationID: conversationID,
 	})
 	response, err := llm.DeepSeekClient{APIKey: settings.DeepSeekAPIKey, Model: settings.DeepSeekModel}.Complete(prompt)
 	if err != nil {
@@ -254,16 +262,36 @@ func (s *Server) llm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	message := model.LLMMessage{
-		ID:        "msg_" + time.Now().UTC().Format("20060102150405.000000000"),
-		Template:  body.Template,
-		Locale:    body.Locale,
-		Prompt:    prompt,
-		Response:  response,
-		CreatedAt: time.Now().UTC(),
+		ID:             "msg_" + time.Now().UTC().Format("20060102150405.000000000"),
+		ConversationID: conversationID,
+		Template:       body.Template,
+		Locale:         body.Locale,
+		UserInput:      body.Input,
+		Prompt:         prompt,
+		Response:       response,
+		CreatedAt:      time.Now().UTC(),
 	}
 	project.LLMHistory = append([]model.LLMMessage{message}, project.LLMHistory...)
 	_ = s.store.SaveProject(project)
 	writeJSON(w, message)
+}
+
+func conversationMessages(history []model.LLMMessage, conversationID string) []model.LLMMessage {
+	if conversationID == "" {
+		conversationID = "default"
+	}
+	messages := []model.LLMMessage{}
+	for i := len(history) - 1; i >= 0; i-- {
+		message := history[i]
+		id := message.ConversationID
+		if id == "" {
+			id = "default"
+		}
+		if id == conversationID {
+			messages = append(messages, message)
+		}
+	}
+	return messages
 }
 
 func writeJSON(w http.ResponseWriter, value any) {
