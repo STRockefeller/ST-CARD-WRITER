@@ -6,16 +6,26 @@ import { api } from './api';
 import type { AppSettings, CardProject, CharacterBook, CharacterCardV2, LorebookEntry } from './types';
 import i18n from './i18n';
 
-const brainstormTemplates = ['brainstorm', 'generate_card', 'generate_lorebook'];
+const brainstormTemplates = ['brainstorm', 'revise_card', 'generate_card', 'generate_lorebook', 'field_rewrite'];
 const reviewTemplates = ['review', 'translate', 'compress', 'mvu'];
+const reviewFocusOptions = ['overall', 'llm_clarity', 'play_experience', 'token_budget', 'lorebook', 'mvu'];
 const templateLabels: Record<string, string> = {
   brainstorm: 'templateBrainstorm',
+  revise_card: 'templateReviseCard',
+  field_rewrite: 'templateFieldRewrite',
   generate_card: 'templateGenerateCard',
   generate_lorebook: 'templateGenerateLorebook',
   review: 'templateReview',
   translate: 'templateTranslate',
   compress: 'templateCompress',
   mvu: 'templateMvu',
+};
+
+type LLMRunRequest = {
+  template?: string;
+  input?: string;
+  conversationId?: string;
+  autoApplyFieldTarget?: FieldTarget;
 };
 
 type FieldTarget =
@@ -144,10 +154,30 @@ export function App() {
   });
 
   const runLLM = useMutation({
-    mutationFn: () =>
-      api.runLLM(draft!.id, conversationId, llmTemplate, settingsQuery.data?.promptLocale ?? 'zh-TW', llmInput),
-    onSuccess() {
+    mutationFn: (request?: LLMRunRequest) =>
+      api.runLLM(
+        draft!.id,
+        request?.conversationId ?? conversationId,
+        request?.template ?? llmTemplate,
+        settingsQuery.data?.promptLocale ?? 'zh-TW',
+        request?.input ?? llmInput,
+      ),
+    onSuccess(message, request) {
       setAppError('');
+      if (request?.autoApplyFieldTarget) {
+        const code = firstCodeBlock(message.response) ?? message.response;
+        const saved = projectsQuery.data?.find((item) => item.id === draft?.id) ?? draft;
+        if (saved) {
+          const next = structuredClone(saved);
+          if (!next.llmHistory.some((item) => item.id === message.id)) {
+            next.llmHistory = [message, ...next.llmHistory];
+          }
+          pushSnapshot(next, `Before AI rewrite ${request.autoApplyFieldTarget.label}`);
+          applyFieldTarget(next, request.autoApplyFieldTarget, code);
+          setDraft(next);
+          saveProject.mutate(next);
+        }
+      }
       queryClient.invalidateQueries({ queryKey: ['projects'] });
     },
     onError(error) {
@@ -207,11 +237,28 @@ export function App() {
   };
 
   const startFieldAI = (target: FieldTarget, value: unknown, mode: 'discuss' | 'revise') => {
+    const currentValue = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+    if (mode === 'revise') {
+      const direction = window.prompt(t('fieldRewritePrompt', { field: target.label }));
+      if (direction === null) return;
+      setFieldTarget(target);
+      setTab('brainstorm');
+      setLlmTemplate('field_rewrite');
+      const nextConversationId = `field_${target.kind}_${Date.now()}`;
+      setConversationId(nextConversationId);
+      setLlmInput(direction);
+      runLLM.mutate({
+        template: 'field_rewrite',
+        conversationId: nextConversationId,
+        input: buildFieldAIPrompt(target.label, currentValue, mode, direction),
+        autoApplyFieldTarget: target,
+      });
+      return;
+    }
     setFieldTarget(target);
     setTab('brainstorm');
     setLlmTemplate('brainstorm');
     setConversationId(`field_${target.kind}_${Date.now()}`);
-    const currentValue = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
     setLlmInput(buildFieldAIPrompt(target.label, currentValue, mode));
   };
 
@@ -341,7 +388,7 @@ export function App() {
                 setTemplate={setLlmTemplate}
                 input={llmInput}
                 setInput={setLlmInput}
-                run={() => runLLM.mutate()}
+                run={(request) => runLLM.mutate(request)}
                 running={runLLM.isLoading}
                 project={draft}
                 updateDraft={updateDraft}
@@ -349,6 +396,7 @@ export function App() {
                 conversationId={conversationId}
                 setConversationId={setConversationId}
                 templates={brainstormTemplates}
+                mode="brainstorm"
                 fieldTarget={fieldTarget}
                 clearFieldTarget={() => setFieldTarget(null)}
               />
@@ -362,7 +410,7 @@ export function App() {
                 setTemplate={setLlmTemplate}
                 input={llmInput}
                 setInput={setLlmInput}
-                run={() => runLLM.mutate()}
+                run={(request) => runLLM.mutate(request)}
                 running={runLLM.isLoading}
                 project={draft}
                 updateDraft={updateDraft}
@@ -370,6 +418,7 @@ export function App() {
                 conversationId={conversationId}
                 setConversationId={setConversationId}
                 templates={reviewTemplates}
+                mode="review"
                 fieldTarget={fieldTarget}
                 clearFieldTarget={() => setFieldTarget(null)}
               />
@@ -720,7 +769,7 @@ function LLMPanel(props: {
   setTemplate: (value: string) => void;
   input: string;
   setInput: (value: string) => void;
-  run: () => void;
+  run: (request?: LLMRunRequest) => void;
   running: boolean;
   project: CardProject;
   updateDraft: (updater: (project: CardProject) => void) => void;
@@ -728,10 +777,14 @@ function LLMPanel(props: {
   conversationId: string;
   setConversationId: (value: string) => void;
   templates: string[];
+  mode: 'brainstorm' | 'review';
   fieldTarget: FieldTarget | null;
   clearFieldTarget: () => void;
 }) {
   const { t } = useTranslation();
+  const [reviewFocus, setReviewFocus] = useState('overall');
+  const [targetLanguage, setTargetLanguage] = useState('繁體中文');
+  const [shortInstruction, setShortInstruction] = useState('');
   const conversations = conversationOptions(props.project.llmHistory, props.conversationId);
   const currentMessages = props.project.llmHistory.filter((message) => getConversationId(message) === props.conversationId);
   const applyCodeBlock = (code: string) => {
@@ -747,6 +800,17 @@ function LLMPanel(props: {
       pushSnapshot(project, `Before applying ${props.fieldTarget?.label}`);
       applyFieldTarget(project, props.fieldTarget!, code);
     });
+  };
+  const runTask = (template: string, input: string) => {
+    props.setTemplate(template);
+    props.run({ template, input });
+  };
+  const runReviewTask = () => {
+    const label = t(`reviewFocus_${reviewFocus}`);
+    runTask('review', `審核方向：${label}\n請依此方向審核目前角色卡與 lorebook，輸出結構化問題、原因與修改建議。`);
+  };
+  const runTranslateTask = () => {
+    runTask('translate', `目標語言：${targetLanguage || '繁體中文'}\n${shortInstruction ? `翻譯注意事項：${shortInstruction}` : ''}`);
   };
   return (
     <section className="llm-layout">
@@ -766,16 +830,73 @@ function LLMPanel(props: {
             <Plus size={16} /> {t('newDiscussion')}
           </button>
         </div>
-        <label className="field">
-          <span>{t('task')}</span>
-          <select value={props.template} onChange={(event) => props.setTemplate(event.target.value)}>
-            {props.templates.map((template) => <option value={template} key={template}>{t(templateLabels[template])}</option>)}
-          </select>
-        </label>
-        <TextField label={t('input')} value={props.input} rows={10} onChange={props.setInput} />
-        <button className="primary inline" onClick={props.run} disabled={props.running}>
-          <Sparkles size={16} /> {props.running ? '...' : t('run')}
-        </button>
+        {props.mode === 'brainstorm' ? (
+          <>
+            <TextField label={t('discussionInput')} value={props.input} rows={10} onChange={props.setInput} />
+            <div className="task-actions">
+              <button className="primary" onClick={() => runTask('brainstorm', props.input)} disabled={props.running || !props.input.trim()}>
+                <Sparkles size={16} /> {props.running ? '...' : t('sendDiscussion')}
+              </button>
+              <button onClick={() => runTask('generate_card', buildManualTaskPrompt('generate_card'))} disabled={props.running}>
+                <Sparkles size={16} /> {t('templateGenerateCard')}
+              </button>
+              <button onClick={() => runTask('generate_lorebook', buildManualTaskPrompt('generate_lorebook'))} disabled={props.running}>
+                <BookOpen size={16} /> {t('templateGenerateLorebook')}
+              </button>
+            </div>
+            <label className="field">
+              <span>{t('reviseDirection')}</span>
+              <input value={shortInstruction} onChange={(event) => setShortInstruction(event.target.value)} placeholder={t('reviseDirectionPlaceholder')} />
+            </label>
+            <button className="secondary strong inline" onClick={() => runTask('revise_card', shortInstruction || t('reviseDefaultDirection'))} disabled={props.running}>
+              <Sparkles size={16} /> {t('templateReviseCard')}
+            </button>
+          </>
+        ) : (
+          <>
+            <label className="field">
+              <span>{t('task')}</span>
+              <select value={props.template} onChange={(event) => props.setTemplate(event.target.value)}>
+                {props.templates.map((template) => <option value={template} key={template}>{t(templateLabels[template])}</option>)}
+              </select>
+            </label>
+            {props.template === 'review' && (
+              <>
+                <label className="field">
+                  <span>{t('reviewFocus')}</span>
+                  <select value={reviewFocus} onChange={(event) => setReviewFocus(event.target.value)}>
+                    {reviewFocusOptions.map((option) => <option value={option} key={option}>{t(`reviewFocus_${option}`)}</option>)}
+                  </select>
+                </label>
+                <button className="primary inline" onClick={runReviewTask} disabled={props.running}>
+                  <Sparkles size={16} /> {props.running ? '...' : t('runReview')}
+                </button>
+              </>
+            )}
+            {props.template === 'translate' && (
+              <>
+                <label className="field">
+                  <span>{t('targetLanguage')}</span>
+                  <input value={targetLanguage} onChange={(event) => setTargetLanguage(event.target.value)} placeholder="繁體中文 / English / 日本語" />
+                </label>
+                <TextField label={t('translationNotes')} value={shortInstruction} rows={3} onChange={setShortInstruction} />
+                <button className="primary inline" onClick={runTranslateTask} disabled={props.running || !targetLanguage.trim()}>
+                  <Languages size={16} /> {props.running ? '...' : t('runTranslate')}
+                </button>
+              </>
+            )}
+            {props.template === 'compress' && (
+              <button className="primary inline" onClick={() => runTask('compress', '請直接壓縮目前角色卡與 lorebook，保留可玩性、角色核心、關鍵設定與觸發條件。')} disabled={props.running}>
+                <Sparkles size={16} /> {props.running ? '...' : t('runCompress')}
+              </button>
+            )}
+            {props.template === 'mvu' && (
+              <button className="primary inline" onClick={() => runTask('mvu', '請直接檢查目前卡片的 MVU/狀態更新寫法，找出變數、規則、初始狀態與翻譯敏感問題。')} disabled={props.running}>
+                <Sparkles size={16} /> {props.running ? '...' : t('runMvu')}
+              </button>
+            )}
+          </>
+        )}
         <p className="hint">{t('generatedPromptNote')}</p>
         {props.fieldTarget && (
           <div className="field-target-banner">
@@ -1037,13 +1158,27 @@ function safeFilename(value: string) {
   return (value || 'character-card').replace(/[\\/:*?"<>|]+/g, '_').trim() || 'character-card';
 }
 
+function firstCodeBlock(text: string) {
+  return splitCodeBlocks(text).find((part) => part.kind === 'code')?.content;
+}
+
+function buildManualTaskPrompt(template: string) {
+  if (template === 'generate_card') {
+    return '請根據目前討論串、現有角色卡內容、創作偏好與 token 預算，生成可套用的 SillyTavern V2 角色卡 JSON。保留有價值的既有內容，不要忽略本討論串已確認的方向。';
+  }
+  if (template === 'generate_lorebook') {
+    return '請根據目前討論串、現有角色卡內容、創作偏好與 token 預算，生成可套用的 lorebook/character_book entries JSON。重點放在觸發鍵、世界資訊、秘密資訊與遊玩時機。';
+  }
+  return '';
+}
+
 function getErrorMessage(error: unknown) {
   if (!error) return '';
   if (error instanceof Error) return error.message;
   return String(error);
 }
 
-function buildFieldAIPrompt(label: string, currentValue: string, mode: 'discuss' | 'revise') {
+function buildFieldAIPrompt(label: string, currentValue: string, mode: 'discuss' | 'revise', direction = '') {
   if (mode === 'discuss') {
     return [
       `請針對欄位 ${label} 展開討論。`,
@@ -1057,8 +1192,9 @@ function buildFieldAIPrompt(label: string, currentValue: string, mode: 'discuss'
   return [
     `請只改寫欄位 ${label}。`,
     '你必須參考完整角色卡、lorebook、創作偏好、token 預算與寫卡技巧，但輸出不得包含整份 JSON。',
-    '請先用 2-4 點簡短說明修改策略，然後輸出單一 fenced code block，code block 內只放此欄位應替換的新內容。',
-    '不要改寫其他欄位；不要包 JSON；不要加入欄位名稱。',
+    '直接輸出單一 fenced code block，code block 內只放此欄位應替換的新內容。',
+    '不要說明策略；不要改寫其他欄位；不要包 JSON；不要加入欄位名稱。',
+    direction ? `使用者改寫方向：${direction}` : '使用者改寫方向：請在不改變角色核心的前提下改善此欄位。',
     '',
     '目前欄位內容：',
     currentValue || '(empty)',

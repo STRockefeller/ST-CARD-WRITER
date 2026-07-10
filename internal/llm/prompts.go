@@ -154,6 +154,22 @@ func formatPriorMessages(messages []model.LLMMessage) string {
 
 func templateInstruction(template string) string {
 	switch template {
+	case "revise_card":
+		return strings.Join([]string{
+			"MODE: direct card revision.",
+			"The user is asking for an immediate improvement pass, not discussion.",
+			"Use the current card, lorebook, prior conversation, creative preferences, token budget, and the user's revision direction.",
+			"Output one fenced json code block containing only the fields/data that should be applied. Do not include a full card unless the change genuinely requires it.",
+			"Keep useful existing information and improve weak, vague, redundant, or play-hostile text.",
+		}, "\n")
+	case "field_rewrite":
+		return strings.Join([]string{
+			"MODE: direct single-field rewrite.",
+			"The user chose an AI rewrite action for one field. Do not discuss, review, or ask questions.",
+			"Use the current card, lorebook, prior conversation, creative preferences, token budget, and the user's rewrite direction.",
+			"Output exactly one fenced code block. Inside the code block, put only the replacement content for that single field.",
+			"Do not output JSON, a field name, explanations, bullets outside the field content, or changes to other fields.",
+		}, "\n")
 	case "generate_card":
 		return strings.Join([]string{
 			"MODE: manual full-card generation.",

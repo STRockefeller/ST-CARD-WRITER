@@ -539,6 +539,13 @@ button:disabled {
   min-width: 210px;
 }
 
+.task-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
 .field-target-banner {
   border: 1px solid rgba(31, 95, 79, 0.16);
   background: #f2f8f5;
