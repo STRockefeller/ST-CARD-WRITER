@@ -1654,19 +1654,24 @@ function pushSnapshot(project: CardProject, label: string) {
 
 function applyCardPatch(project: CardProject, payload: any) {
   if (Array.isArray(payload)) {
-    project.lorebook.entries = payload;
+    project.lorebook.entries = normalizeLorebookEntries(payload);
     return;
   }
   const source = payload.card ?? payload.character_card ?? payload;
   if (source.spec === 'chara_card_v2' && source.data) {
     project.card = normalizeCard(source);
     if (source.data.character_book) {
-      project.lorebook = source.data.character_book;
+      project.lorebook = normalizeLorebook(source.data.character_book, project.lorebook);
     }
     return;
   }
   if (payload.lorebook || payload.character_book) {
-    project.lorebook = payload.lorebook ?? payload.character_book;
+    project.lorebook = normalizeLorebook(payload.lorebook ?? payload.character_book, project.lorebook);
+    return;
+  }
+  if (isStandaloneLorebook(payload)) {
+    project.lorebook = normalizeLorebook(payload, project.lorebook);
+    return;
   }
   const dataPatch = source.data ?? source;
   const cardKeys = [
@@ -1685,11 +1690,62 @@ function applyCardPatch(project: CardProject, payload: any) {
     'character_version',
     'extensions',
   ];
+  let applied = false;
   for (const key of cardKeys) {
     if (Object.prototype.hasOwnProperty.call(dataPatch, key)) {
       (project.card.data as any)[key] = dataPatch[key];
+      applied = true;
     }
   }
+  if (!applied) throw new Error('JSON does not contain supported card or lorebook fields.');
+}
+
+function isStandaloneLorebook(value: any) {
+  return Boolean(value && typeof value === 'object' && Array.isArray(value.entries));
+}
+
+function normalizeLorebook(value: any, current: CharacterBook): CharacterBook {
+  return {
+    name: typeof value.name === 'string' ? value.name : current.name,
+    description: typeof value.description === 'string' ? value.description : current.description,
+    scan_depth: numberOr(value.scan_depth, current.scan_depth),
+    token_budget: numberOr(value.token_budget, current.token_budget),
+    recursive_scanning: typeof value.recursive_scanning === 'boolean' ? value.recursive_scanning : current.recursive_scanning,
+    entries: normalizeLorebookEntries(Array.isArray(value.entries) ? value.entries : []),
+    extensions: value.extensions && typeof value.extensions === 'object' ? value.extensions : {},
+  };
+}
+
+function normalizeLorebookEntries(entries: any[]): LorebookEntry[] {
+  return entries.map((entry, index) => {
+    const id = numberOr(entry?.id, index + 1);
+    return {
+      id,
+      keys: stringList(entry?.keys ?? entry?.key),
+      secondary_keys: stringList(entry?.secondary_keys),
+      content: typeof entry?.content === 'string' ? entry.content : '',
+      enabled: typeof entry?.enabled === 'boolean' ? entry.enabled : true,
+      insertion_order: numberOr(entry?.insertion_order, id),
+      case_sensitive: Boolean(entry?.case_sensitive),
+      selective: Boolean(entry?.selective),
+      constant: Boolean(entry?.constant),
+      position: typeof entry?.position === 'string' ? entry.position : 'before_char',
+      priority: numberOr(entry?.priority, 100),
+      comment: typeof entry?.comment === 'string' ? entry.comment : (typeof entry?.name === 'string' ? entry.name : ''),
+      extensions: entry?.extensions && typeof entry.extensions === 'object' ? entry.extensions : {},
+    };
+  });
+}
+
+function numberOr(value: unknown, fallback: number) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function stringList(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map(String).map((item) => item.trim()).filter(Boolean);
+  if (typeof value === 'string') return value.split(/[,，]/).map((item) => item.trim()).filter(Boolean);
+  return [];
 }
 
 function normalizeCard(card: any): CharacterCardV2 {
