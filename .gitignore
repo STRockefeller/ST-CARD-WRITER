@@ -3,3 +3,17 @@ dist/
 data/
 .cache/
 *.log
+.env
+.env.*
+!.env.example
+*.sqlite
+*.sqlite3
+*.db
+coverage/
+.idea/
+.vscode/
+.codex/
+.DS_Store
+Thumbs.db
+*.tmp
+*.swp

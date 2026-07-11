@@ -1,6 +1,9 @@
 {
   "name": "st-card-writer",
   "version": "0.1.0",
+  "description": "Local-first SillyTavern character card and lorebook editor with LLM assistance",
+  "license": "MIT",
+  "repository": "https://github.com/STRockefeller/ST-CARD-WRITER",
   "private": true,
   "type": "module",
   "scripts": {

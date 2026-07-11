@@ -1,102 +1,177 @@
 # SillyTavern Card Writer
 
-這是一個 local-first 的 SillyTavern V2 角色卡寫作工具，用來建立、編輯、審稿、翻譯與匯出角色卡。
+這是一套 local-first 的 SillyTavern 角色卡與 Lorebook 編輯工具，整合 LLM 協作、審稿、翻譯、Token 預算、版本快照以及 JSON／PNG 匯入匯出。
 
-English documentation: [README.md](./README.md)
+[English documentation](./README.md)
 
-## 專案內容
+## 主要功能
 
-SillyTavern Card Writer 的目標是把「從點子到可匯入 SillyTavern 的角色卡」整理成一個完整工作流：
+- 建立與編輯 SillyTavern V2 角色卡。
+- 建立獨立 Lorebook，或匯出時嵌入 `data.character_book`。
+- 匯入 V2、V3、舊式 SillyTavern JSON，以及含 `chara` metadata 的 PNG 卡片。
+- 加入 PNG、JPEG、WebP、GIF 或 BMP 圖片，調整 2:3 取景後輸出 PNG 角色卡。
+- Lorebook 沒有 entry 時，不輸出空的 `character_book`。
+- 估算永久、動態與 Lorebook Token，並設定各類預算。
+- 使用多個獨立討論串與 LLM 進行腦力激盪，不會一開始就強制生成整張卡片。
+- 手動觸發角色卡／Lorebook 生成、整卡修改，或針對主要欄位進行 AI 討論與改寫。
+- 檢查冗詞、LLM 理解度、遊玩體驗、缺漏資訊、Lorebook 觸發、Token 使用與 MVU 一致性。
+- 翻譯時保護 macro、URL、檔案路徑、JSON key、程式碼區塊與 MVU 變數名稱。
+- 不透過 LLM，直接在本機進行繁簡轉換。
+- 一鍵生成簡潔的 `{{user}}` 扮演角色，以及 natural language／booru tags 封面 Prompt。
+- AI 套用前建立快照，可還原或比較版本。
+- 儘可能保留其他工具寫入的未知 extension 資料。
 
-- 撰寫 SillyTavern V2 角色卡。
-- 建立與編輯 lorebook。
-- 匯出內嵌 `character_book` 的角色卡。
-- 匯入 SillyTavern V2 JSON，以及帶有 `chara` metadata 的 PNG 卡。
-- 估算永久、動態、lorebook token 用量。
-- 設定 token 預算並顯示超標狀態。
-- 使用 LLM 協助腦力激盪、草稿生成、改寫、壓縮、找碴、翻譯與 MVU 檢查。
-- 翻譯流程會注意保護 `{{char}}`、`{{user}}`、macro、URL、檔案路徑、JSON-like 欄位與 MVU 變數名稱。
+## Local-first 與資料隱私
 
-資料會保存在本機 SQLite：`data/app.sqlite`。目前沒有帳號系統，也不做雲端同步。
+本專案沒有帳號系統或雲端同步。專案、設定、快照與 LLM 紀錄都保存在 `data/app.sqlite`；LLM 請求診斷則寫入 `data/llm-interactions.log`。
 
-## 技術棧
+API key 只保存在本機 SQLite，回傳到介面時會遮蔽。只有在使用者主動執行 LLM 功能時，卡片內容才會傳送給「設定」頁所選的 provider。本機繁簡轉換不會呼叫 LLM。
 
-- 前端：Vite、React、TypeScript、TanStack Query、i18next
-- 後端：Go、SQLite
-- LLM provider：DeepSeek
-- 預設模型：`deepseek-v4-flash`，設定中也可選 `deepseek-v4-pro`
+完整的 `data/`、環境變數檔、logs、build 輸出與本機資料庫都已排除在 Git 之外。
+
+## 程式架構
+
+```text
+瀏覽器（Vite + React + TypeScript）
+        |
+        | /api
+        v
+Go HTTP server（127.0.0.1:8787）
+        |
+        +-- SQLite 專案／設定儲存
+        +-- LLM provider adapters
+        +-- 本機繁簡轉換
+```
+
+### 前端
+
+- Vite 4
+- React 18、TypeScript
+- TanStack Query
+- i18next（`zh-TW`、`en`）
+- Lucide icons
+
+### 後端
+
+- Go 1.22+
+- 標準 `net/http` server
+- `modernc.org/sqlite`
+- `gocc` 本機繁簡轉換
+
+### 支援的 LLM Provider
+
+- DeepSeek
+- OpenAI
+- OpenRouter
+- Anthropic
+- Google Gemini
+- 自訂 OpenAI-compatible Chat Completions endpoint
+
+由於各 provider 的模型清單會更新，模型 ID 採自由輸入。
 
 ## 系統需求
 
-- Go 1.22+
-- Node.js 16+
+- Go 1.22 或更新版本
+- Node.js 16.13 或更新版本
 - npm
 
-目前依賴版本已固定在可支援 Node 16.13.1 的範圍。
-
-## 使用方式
+## 安裝與啟動
 
 安裝依賴：
 
 ```bash
 npm install
-go mod tidy
+go mod download
 ```
 
-啟動本機 App：
+同時啟動前端與本機 API：
 
 ```bash
 npm run dev
 ```
 
-開啟：
+開啟 <http://127.0.0.1:5173/>。Go API 會監聽 <http://127.0.0.1:8787/>。
 
-```text
-http://127.0.0.1:5173/
-```
+要關閉服務，請在執行 `npm run dev` 的 terminal 按 `Ctrl+C`。
 
-Go API 會跑在：
+## 初次設定 LLM
 
-```text
-http://127.0.0.1:8787/
-```
+1. 建立或匯入一個專案。
+2. 開啟上方的「設定」分頁。
+3. 選擇 LLM Provider。
+4. 輸入該 provider 的 API key 與模型 ID。
+5. 若使用自訂 OpenAI-compatible provider，輸入完整的 Chat Completions API URL。
+6. 選擇介面語言與 Prompt 輸出語言。
+7. 按下「儲存」。
 
-## 初次設定 LLM API Key
+模型 ID 必須是該 provider 實際支援的模型。本工具不會替使用者建立或驗證 provider 帳號。
 
-1. 開啟 `http://127.0.0.1:5173/`。
-2. 先建立或匯入一個專案。
-3. 點上方工作區分頁的 `設定` / `Settings`。
-4. 在 `DeepSeek API Key` 欄位貼上你的 DeepSeek API key。
-5. 選擇模型：
-   - `deepseek-v4-flash`：預設，速度較快。
-   - `deepseek-v4-pro`：適合品質要求較高的生成、審稿與翻譯。
-6. 選擇介面語言與 prompt 輸出語言。
-7. 按下 `儲存` / `Save`。
+## 建議工作流程
 
-API key 只會保存在本機 SQLite 資料庫中。之後再次顯示設定時，畫面上會看到遮蔽後的 key。
+1. 建立新專案，或匯入 JSON／PNG 角色卡。
+2. 在「概念腦暴」使用一個或多個討論串逐步確認方向。
+3. 在「角色卡」與「Lorebook」生成或編輯欄位。
+4. 若需要 PNG 卡片，在「角色卡」加入圖片並調整取景。
+5. 到「Token 預算」檢查用量。
+6. 在「審稿／翻譯」進行找碴、翻譯、壓縮、MVU 檢查或本機繁簡轉換。
+7. 儲存專案，再下載 JSON 或 PNG。
 
-## 主要工作流
+AI 輸出不應被視為必然正確。「套用到卡片」只會出現在 JSON-like 程式碼區塊，套用前會建立版本快照。
 
-1. 建立新專案，或匯入既有 V2 JSON/PNG 卡。
-2. 在 `概念腦暴` 中用 LLM 發展角色點子。
-3. 到 `角色卡` 填寫或調整各欄位。
-4. 到 `Lorebook` 加入世界觀、關係、規則、秘密等 entries。
-5. 到 `Token 預算` 檢查永久、動態與 lorebook token 用量。
-6. 到 `審稿/翻譯` 執行找碴、翻譯、壓縮或 MVU 檢查。
-7. 匯出 SillyTavern V2 JSON 角色卡。
+## 匯入與匯出格式
 
-## 驗證指令
+### 匯入
+
+- SillyTavern V2 JSON
+- SillyTavern V3 JSON，匯入後正規化到編輯器資料模型
+- 舊式 SillyTavern JSON 欄位
+- 使用未壓縮 `tEXt` 或 `iTXt` `chara` metadata 的 PNG 卡片
+
+### 匯出
+
+- SillyTavern-compatible V2 JSON
+- 將 base64 V2 JSON 寫入 `chara` text chunk 的 PNG
+- 可選擇嵌入 `character_book`；沒有 Lorebook entry 時會省略
+
+圖片會依 2:3 取景輸出。動態圖片輸出時使用瀏覽器解碼出的畫面。
+
+## 開發與驗證
 
 ```bash
-go test ./...
+# 前端型別檢查
 npm run typecheck
+
+# 前端行為測試
 npm test
+
+# 正式前端 build
 npm run build
+
+# Go 測試
+go test ./...
+```
+
+## 目錄結構
+
+```text
+cmd/server/          Go server 進入點
+internal/api/        HTTP routes、匯入匯出、LLM orchestration
+internal/llm/        Prompt registry 與 provider clients
+internal/model/      卡片／專案 model 與 Token 估算
+internal/store/      SQLite persistence
+internal/zhconvert/  本機繁簡轉換
+src/                 React application
+test/                前端行為測試
 ```
 
 ## 目前限制
 
-- PNG 匯入支援常見未壓縮 `tEXt` / `iTXt` 的 `chara` metadata；尚未支援 PNG 匯出。
-- Token 計算目前是近似估算，不是 DeepSeek 官方 tokenizer。
-- LLM 回覆會保存到歷史紀錄，但還沒有一鍵套用欄位 patch。
-- MVU 目前偏向保護、檢查與一致性審稿，尚未做完整 MVU 卡片生成器。
+- Token 數量是近似估算，不是 provider 原生 tokenizer 的結果。
+- LLM 寫作品質與結構化輸出遵循度取決於所選模型。
+- MVU 支援目前集中在生成協助、保護、翻譯安全與一致性檢查，尚未提供獨立視覺化 MVU builder。
+- 尚未支援匯入 PNG `zTXt` 或壓縮 `iTXt` metadata。
+- 本工具以本機單一使用者為設計前提，沒有 authentication layer。
+
+## License
+
+本專案採用 [MIT License](./LICENSE)。Copyright (c) 2026 STRockefeller。

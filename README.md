@@ -1,38 +1,79 @@
 # SillyTavern Card Writer
 
-A local-first writing tool for creating, editing, reviewing, translating, and exporting SillyTavern V2 character cards.
+A local-first web app for creating, editing, reviewing, translating, and exporting SillyTavern character cards and lorebooks with LLM assistance.
 
-Traditional Chinese documentation: [README.zh-TW.md](./README.zh-TW.md)
+[繁體中文文件](./README.zh-TW.md)
 
-## What This App Does
+## Highlights
 
-SillyTavern Card Writer helps you build a complete character-card project from idea to export:
+- Create and edit SillyTavern V2 character cards.
+- Create standalone lorebooks or embed them as `data.character_book`.
+- Import V2/V3/legacy SillyTavern JSON cards and PNG cards containing `chara` metadata.
+- Attach PNG, JPEG, WebP, GIF, or BMP artwork, adjust the 2:3 crop, and export a PNG character card.
+- Export JSON without an empty lorebook.
+- Estimate permanent, dynamic, and lorebook token usage with configurable budgets.
+- Brainstorm across multiple persistent discussion threads before manually generating content.
+- Generate cards and lorebooks, revise whole cards, or discuss/rewrite individual fields.
+- Review cards for clarity, redundancy, playability, missing details, lorebook triggers, token use, and MVU consistency.
+- Translate while protecting macros, URLs, paths, JSON keys, fenced code, and MVU variable names.
+- Convert Simplified and Traditional Chinese locally without an LLM.
+- Generate a concise `{{user}}` persona and natural-language/booru cover prompts.
+- Keep snapshots before AI-applied changes and restore or compare previous versions.
+- Preserve unknown extension data where possible.
 
-- Write SillyTavern V2 character cards.
-- Create and edit lorebooks.
-- Export cards with an embedded `character_book`.
-- Import SillyTavern V2 JSON files and PNG cards with `chara` metadata.
-- Estimate permanent, dynamic, and lorebook token usage.
-- Set token budgets and check over-budget sections.
-- Collaborate with an LLM for brainstorming, drafting, rewriting, compression, review, translation, and MVU checks.
-- Preserve SillyTavern-friendly structures such as `{{char}}`, `{{user}}`, macros, URLs, file paths, JSON-like fields, and MVU variable names during translation workflows.
+## Local-First Design
 
-The app stores data locally in SQLite at `data/app.sqlite`. There is no account system or cloud sync in this version.
+The app has no account system or cloud synchronization. Projects, settings, snapshots, and LLM history are stored in `data/app.sqlite`. LLM request diagnostics are written to `data/llm-interactions.log`.
 
-## Tech Stack
+API keys are stored in the local SQLite database and masked when returned to the UI. Card content is sent only to the LLM provider selected in Settings when an LLM action is triggered. Local Chinese script conversion does not call an LLM.
 
-- Frontend: Vite, React, TypeScript, TanStack Query, i18next
-- Backend: Go, SQLite
-- LLM provider: DeepSeek
-- Default models: `deepseek-v4-flash`, with `deepseek-v4-pro` available in settings
+The complete `data/` directory, environment files, logs, build output, and local databases are excluded from Git.
+
+## Architecture
+
+```text
+Browser (Vite + React + TypeScript)
+        |
+        | /api
+        v
+Go HTTP server (127.0.0.1:8787)
+        |
+        +-- SQLite project/settings store
+        +-- LLM provider adapters
+        +-- local Chinese conversion
+```
+
+### Frontend
+
+- Vite 4
+- React 18 and TypeScript
+- TanStack Query
+- i18next (`zh-TW` and `en`)
+- Lucide icons
+
+### Backend
+
+- Go 1.22+
+- Standard `net/http` server
+- SQLite through `modernc.org/sqlite`
+- `gocc` for local Simplified/Traditional Chinese conversion
+
+### LLM Providers
+
+- DeepSeek
+- OpenAI
+- OpenRouter
+- Anthropic
+- Google Gemini
+- Custom OpenAI-compatible Chat Completions endpoint
+
+Model IDs are editable because provider catalogs change over time.
 
 ## Requirements
 
-- Go 1.22+
-- Node.js 16+
+- Go 1.22 or later
+- Node.js 16.13 or later
 - npm
-
-This project is currently pinned to dependency versions that work with Node 16.13.1.
 
 ## Getting Started
 
@@ -40,65 +81,97 @@ Install dependencies:
 
 ```bash
 npm install
-go mod tidy
+go mod download
 ```
 
-Run the local app:
+Start the frontend and local API together:
 
 ```bash
 npm run dev
 ```
 
-Open:
+Open <http://127.0.0.1:5173/>. The local API listens on <http://127.0.0.1:8787/>.
 
-```text
-http://127.0.0.1:5173/
-```
+Stop both services with `Ctrl+C` in the terminal running `npm run dev`.
 
-The Go API runs at:
+## Configure an LLM
 
-```text
-http://127.0.0.1:8787/
-```
+1. Create or import a project.
+2. Open the **Settings** tab.
+3. Select an LLM provider.
+4. Enter the provider API key and model ID.
+5. For a custom OpenAI-compatible provider, enter the full Chat Completions API URL.
+6. Select the UI and prompt languages.
+7. Save the settings.
 
-## First-Time LLM API Key Setup
+The model ID must be valid for the selected provider. The app does not create or validate provider accounts.
 
-1. Open the app at `http://127.0.0.1:5173/`.
-2. Create or import a project.
-3. Click the `Settings` tab in the top workspace tabs.
-4. Paste your DeepSeek API key into `DeepSeek API Key`.
-5. Choose a model:
-   - `deepseek-v4-flash` for the default fast workflow.
-   - `deepseek-v4-pro` for higher-quality drafting/review.
-6. Choose UI and prompt languages.
-7. Click `Save`.
+## Typical Workflow
 
-The API key is saved only in the local SQLite database. When settings are displayed again, the key is masked.
+1. Create a project or import a JSON/PNG character card.
+2. Develop the concept in **Brainstorm** using one or more discussion threads.
+3. Generate or edit fields in **Card** and **Lorebook**.
+4. Attach and crop artwork in **Card** if PNG export is needed.
+5. Review token usage in **Token Budget**.
+6. Run critique, translation, compression, MVU checks, or local Chinese conversion in **Review/Translate**.
+7. Save the project, then export JSON or PNG.
 
-## Main Workflow
+AI output is never assumed to be correct. The **Apply to card** action is shown only for JSON-like code blocks, and a snapshot is created before applicable content is applied.
 
-1. Create a new project or import an existing V2 JSON/PNG card.
-2. Use `Brainstorm` to develop the character concept with the LLM.
-3. Fill or refine fields in `Card`.
-4. Add world, relationship, rule, or secret entries in `Lorebook`.
-5. Check `Token Budget` for permanent, dynamic, and lorebook token usage.
-6. Use `Review/Translate` for critique, translation, compression, or MVU checks.
-7. Export a SillyTavern V2 JSON card.
+## Import and Export
 
-## Validation
+### Import
 
-Run backend and frontend checks:
+- SillyTavern V2 JSON
+- SillyTavern V3 JSON normalized into the editor model
+- Legacy SillyTavern JSON fields
+- PNG character cards with uncompressed `tEXt` or `iTXt` `chara` metadata
+
+### Export
+
+- SillyTavern-compatible V2 JSON
+- PNG with base64-encoded V2 JSON in a `chara` text chunk
+- Optional embedded `character_book`; omitted when there are no lorebook entries
+
+PNG artwork is rendered to a 2:3 crop. Animated images use the browser-decoded frame during export.
+
+## Development Commands
 
 ```bash
-go test ./...
+# Frontend type checking
 npm run typecheck
+
+# Frontend behavior test
 npm test
+
+# Production frontend build
 npm run build
+
+# Go tests
+go test ./...
+```
+
+## Project Layout
+
+```text
+cmd/server/          Go server entry point
+internal/api/        HTTP routes, import/export, LLM orchestration
+internal/llm/        Prompt registry and provider clients
+internal/model/      Card/project models and token estimation
+internal/store/      SQLite persistence
+internal/zhconvert/  Local Chinese script conversion
+src/                 React application
+test/                Frontend behavior tests
 ```
 
 ## Current Limitations
 
-- PNG import supports common uncompressed `tEXt` and `iTXt` `chara` metadata. PNG export is not implemented yet.
-- Token counting is an approximation, not an official DeepSeek tokenizer.
-- LLM responses are saved as history, but automatic field patch application is not implemented yet.
-- MVU support currently focuses on review, protection, and consistency checks rather than full MVU card generation.
+- Token counts are estimates, not provider-native tokenizer results.
+- LLM output quality and structured-output compliance depend on the selected model.
+- MVU support focuses on generation assistance, protection, translation safety, and consistency checks rather than a dedicated visual MVU builder.
+- PNG `zTXt` and compressed `iTXt` card metadata are not currently imported.
+- The app is intended for local single-user use and has no authentication layer.
+
+## License
+
+Released under the [MIT License](./LICENSE). Copyright (c) 2026 STRockefeller.
