@@ -13,5 +13,9 @@ assert.match(source, /Never write display_data strings/);
 assert.match(source, /testingcf\.jsdelivr\.net\/gh\/MagicalAstrogy\/MagVarUpdate@master\/artifact\/bundle\.js/);
 assert.match(source, /MVU_RUNTIME_ID = '[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}'/);
 assert.match(source, /prepareMvuCardForExport\(card\)/);
+assert.match(source, /mergeLorebookEntries\(payload, project\.lorebook\.entries\)/);
+assert.match(source, /MVU entries are edited through the MVU designer and remain its source of truth/);
+assert.match(source, /candidate\.id === target\.entryId/);
+assert.match(source, /syncMvuTypeContract\(rules\.content, clean\)/);
 
 console.log('MVU export compatibility test passed');

@@ -39,7 +39,7 @@ type LLMRunRequest = {
 type FieldTarget =
   | { kind: 'card'; key: keyof CardProject['card']['data']; label: string }
   | { kind: 'lorebook'; key: keyof CharacterBook; label: string }
-  | { kind: 'loreEntry'; index: number; key: keyof LorebookEntry; label: string };
+  | { kind: 'loreEntry'; index: number; entryId?: number; key: keyof LorebookEntry; label: string };
 
 export function App() {
   const { t } = useTranslation();
@@ -947,8 +947,8 @@ function MvuEditor({
             <div className="entry-head">
               <strong>{t('variableOverview')}</strong><span>{variables.length}</span>
               <span className="field-ai-actions">
-                <button type="button" onClick={() => startFieldAI({ kind: 'loreEntry', index: initialIndex, key: 'content', label: 'MVU initial variables JSON' }, initialEntry.content, 'discuss')}>{t('aiDiscuss')}</button>
-                <button type="button" onClick={() => startFieldAI({ kind: 'loreEntry', index: initialIndex, key: 'content', label: 'MVU initial variables JSON' }, initialEntry.content, 'revise')}>{t('aiRevise')}</button>
+                <button type="button" onClick={() => startFieldAI({ kind: 'loreEntry', index: initialIndex, entryId: initialEntry.id, key: 'content', label: 'MVU initial variables JSON' }, initialEntry.content, 'discuss')}>{t('aiDiscuss')}</button>
+                <button type="button" onClick={() => startFieldAI({ kind: 'loreEntry', index: initialIndex, entryId: initialEntry.id, key: 'content', label: 'MVU initial variables JSON' }, initialEntry.content, 'revise')}>{t('aiRevise')}</button>
                 <button className="primary" onClick={addVariable} disabled={!parsed.value}><Plus size={15} /> {t('addVariable')}</button>
               </span>
             </div>
@@ -976,7 +976,15 @@ function MvuEditor({
               <button onClick={() => parsed.value && writeVariables(parsed.value)} disabled={!parsed.value}>{t('formatJson')}</button>
             </div>
             <p className="hint">{t('initialVariablesHint')}</p>
-            <textarea className={parsed.error ? 'json-editor invalid' : 'json-editor'} rows={16} value={initialEntry.content} spellCheck={false} onChange={(event) => updateEntry(initialIndex, (entry) => { entry.content = event.target.value; })} />
+            <textarea className={parsed.error ? 'json-editor invalid' : 'json-editor'} rows={16} value={initialEntry.content} spellCheck={false} onChange={(event) => {
+              const content = event.target.value;
+              updateDraft((draft) => {
+                const entry = draft.lorebook.entries.find((candidate) => candidate.id === initialEntry.id && isMvuInitialEntry(candidate));
+                if (entry) entry.content = content;
+                const nextRules = draft.lorebook.entries.find(isMvuRulesEntry);
+                if (nextRules) nextRules.content = syncMvuTypeContract(nextRules.content, content);
+              });
+            }} />
             {parsed.error ? <p className="validation-error">{parsed.error}</p> : <p className="validation-ok">{t('validVariableTree', { count: variables.length })}</p>}
           </details>
 
@@ -985,8 +993,8 @@ function MvuEditor({
               <div className="entry-head">
                 <strong>{t('variableUpdateRules')}</strong><span className="compat-badge">MagVarUpdate · JSON Patch</span>
                 <span className="field-ai-actions">
-                  <button type="button" onClick={() => startFieldAI({ kind: 'loreEntry', index: rulesIndex, key: 'content', label: 'MVU variable update rules' }, rulesEntry.content, 'discuss')}>{t('aiDiscuss')}</button>
-                  <button type="button" onClick={() => startFieldAI({ kind: 'loreEntry', index: rulesIndex, key: 'content', label: 'MVU variable update rules' }, rulesEntry.content, 'revise')}>{t('aiRevise')}</button>
+                  <button type="button" onClick={() => startFieldAI({ kind: 'loreEntry', index: rulesIndex, entryId: rulesEntry.id, key: 'content', label: 'MVU variable update rules' }, rulesEntry.content, 'discuss')}>{t('aiDiscuss')}</button>
+                  <button type="button" onClick={() => startFieldAI({ kind: 'loreEntry', index: rulesIndex, entryId: rulesEntry.id, key: 'content', label: 'MVU variable update rules' }, rulesEntry.content, 'revise')}>{t('aiRevise')}</button>
                 </span>
               </div>
               <p className="hint">{t('variableUpdateRulesHint')}</p>
@@ -1301,8 +1309,8 @@ function LoreEntry({
       updater(book.entries[index]);
     });
   const entryAI = (key: keyof LorebookEntry, label: string, value: unknown) => ({
-    onDiscuss: () => startFieldAI({ kind: 'loreEntry', index, key, label }, value, 'discuss' as const),
-    onRevise: () => startFieldAI({ kind: 'loreEntry', index, key, label }, value, 'revise' as const),
+    onDiscuss: () => startFieldAI({ kind: 'loreEntry', index, entryId: entry.id, key, label }, value, 'discuss' as const),
+    onRevise: () => startFieldAI({ kind: 'loreEntry', index, entryId: entry.id, key, label }, value, 'revise' as const),
   });
   return (
     <article className="entry">
@@ -1889,8 +1897,16 @@ function applyFieldTarget(project: CardProject, target: FieldTarget, value: stri
     return;
   }
   if (target.kind === 'loreEntry') {
-    const entry = project.lorebook.entries[target.index];
-    if (entry) (entry as any)[target.key] = clean;
+    const entry = target.entryId === undefined
+      ? project.lorebook.entries[target.index]
+      : project.lorebook.entries.find((candidate) => candidate.id === target.entryId);
+    if (entry) {
+      (entry as any)[target.key] = clean;
+      if (target.key === 'content' && isMvuInitialEntry(entry)) {
+        const rules = project.lorebook.entries.find(isMvuRulesEntry);
+        if (rules) rules.content = syncMvuTypeContract(rules.content, clean);
+      }
+    }
   }
 }
 
@@ -2113,7 +2129,7 @@ function pushSnapshot(project: CardProject, label: string) {
 
 function applyCardPatch(project: CardProject, payload: any) {
   if (Array.isArray(payload)) {
-    project.lorebook.entries = normalizeLorebookEntries(payload);
+    project.lorebook.entries = mergeLorebookEntries(payload, project.lorebook.entries);
     return;
   }
   const source = payload.card ?? payload.character_card ?? payload;
@@ -2170,9 +2186,33 @@ function normalizeLorebook(value: any, current: CharacterBook): CharacterBook {
     scan_depth: numberOr(value.scan_depth, current.scan_depth),
     token_budget: numberOr(value.token_budget, current.token_budget),
     recursive_scanning: typeof value.recursive_scanning === 'boolean' ? value.recursive_scanning : current.recursive_scanning,
-    entries: normalizeLorebookEntries(Array.isArray(value.entries) ? value.entries : []),
-    extensions: value.extensions && typeof value.extensions === 'object' ? value.extensions : {},
+    entries: Array.isArray(value.entries) ? mergeLorebookEntries(value.entries, current.entries) : current.entries,
+    extensions: value.extensions && typeof value.extensions === 'object' ? value.extensions : (current.extensions ?? {}),
   };
+}
+
+function mergeLorebookEntries(incoming: any[], current: LorebookEntry[]): LorebookEntry[] {
+  const normalized = normalizeLorebookEntries(incoming);
+  const protectedEntries = current.filter((entry) => isManagedMvuInitialEntry(entry) || isMvuRulesEntry(entry));
+  if (protectedEntries.length === 0) return normalized;
+
+  // MVU entries are edited through the MVU designer and remain its source of truth.
+  // Lorebook/card generation may replace ordinary entries, but must not silently replace them.
+  const hasProtectedInitial = protectedEntries.some(isManagedMvuInitialEntry);
+  const hasProtectedRules = protectedEntries.some(isMvuRulesEntry);
+  const ordinaryIncoming = normalized.filter((entry) =>
+    !(hasProtectedInitial && isMvuInitialEntry(entry)) && !(hasProtectedRules && isMvuRulesEntry(entry)),
+  );
+  const usedIds = new Set(protectedEntries.map((entry) => entry.id));
+  let nextId = Math.max(0, ...normalized.map((entry) => entry.id), ...protectedEntries.map((entry) => entry.id)) + 1;
+  for (const entry of ordinaryIncoming) {
+    if (usedIds.has(entry.id)) {
+      while (usedIds.has(nextId)) nextId += 1;
+      entry.id = nextId++;
+    }
+    usedIds.add(entry.id);
+  }
+  return [...ordinaryIncoming, ...protectedEntries.map((entry) => structuredClone(entry))];
 }
 
 function normalizeLorebookEntries(entries: any[]): LorebookEntry[] {
