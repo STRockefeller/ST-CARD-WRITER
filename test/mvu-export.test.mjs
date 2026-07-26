@@ -17,5 +17,15 @@ assert.match(source, /mergeLorebookEntries\(payload, project\.lorebook\.entries\
 assert.match(source, /MVU entries are edited through the MVU designer and remain its source of truth/);
 assert.match(source, /candidate\.id === target\.entryId/);
 assert.match(source, /syncMvuTypeContract\(rules\.content, clean\)/);
+assert.match(source, /template === 'generate_mvu'/);
+assert.match(source, /applyGeneratedMvuPatch\(project, payload\)/);
+assert.match(source, /initial_variables and\/or update_rules/);
+assert.match(source, /applyGeneratedCardPatch/);
+assert.doesNotMatch(source.match(/const cardOnlyKeys = \[[\s\S]*?\];/)?.[0] ?? '', /extensions|character_book/);
+assert.match(source, /applyGeneratedLorebookPatch/);
+for (const template of ['generate_card', 'generate_lorebook', 'generate_mvu']) {
+  assert.match(source, new RegExp(`runTask\\('${template}', buildGuidedTaskPrompt\\('${template}', props\\.input\\)\\)`));
+}
+assert.match(source, /使用者補充的生成方向/);
 
 console.log('MVU export compatibility test passed');

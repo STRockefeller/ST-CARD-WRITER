@@ -6,7 +6,7 @@ import { api } from './api';
 import type { AppSettings, CardProject, CharacterBook, CharacterCardV2, LorebookEntry } from './types';
 import i18n from './i18n';
 
-const brainstormTemplates = ['brainstorm', 'revise_card', 'generate_card', 'generate_lorebook', 'field_rewrite'];
+const brainstormTemplates = ['brainstorm', 'revise_card', 'generate_card', 'generate_lorebook', 'generate_mvu', 'field_rewrite'];
 const reviewTemplates = ['review', 'translate', 'compress', 'mvu'];
 const reviewFocusOptions = ['overall', 'llm_clarity', 'play_experience', 'token_budget', 'lorebook', 'mvu'];
 const providerDefaults: Record<AppSettings['llmProvider'], string> = {
@@ -23,6 +23,7 @@ const templateLabels: Record<string, string> = {
   field_rewrite: 'templateFieldRewrite',
   generate_card: 'templateGenerateCard',
   generate_lorebook: 'templateGenerateLorebook',
+  generate_mvu: 'templateGenerateMvu',
   review: 'templateReview',
   translate: 'templateTranslate',
   compress: 'templateCompress',
@@ -1446,11 +1447,11 @@ function LLMPanel(props: {
   const [shortInstruction, setShortInstruction] = useState('');
   const conversations = conversationOptions(props.project.llmHistory, props.conversationId);
   const currentMessages = props.project.llmHistory.filter((message) => getConversationId(message) === props.conversationId);
-  const applyCodeBlock = (code: string) => {
+  const applyCodeBlock = (code: string, sourceTemplate: string) => {
     const parsed = JSON.parse(code);
     props.updateDraft((project) => {
-      pushSnapshot(project, `Before applying ${props.template}`);
-      applyCardPatch(project, parsed);
+      pushSnapshot(project, `Before applying ${sourceTemplate}`);
+      applyTemplatePatch(project, sourceTemplate, parsed);
     });
   };
   const applyFieldBlock = (code: string) => {
@@ -1496,11 +1497,14 @@ function LLMPanel(props: {
               <button className="primary" onClick={() => runTask('brainstorm', props.input)} disabled={props.running || !props.input.trim()}>
                 <Sparkles size={16} /> {props.running ? '...' : t('sendDiscussion')}
               </button>
-              <button onClick={() => runTask('generate_card', buildManualTaskPrompt('generate_card'))} disabled={props.running}>
+              <button onClick={() => runTask('generate_card', buildGuidedTaskPrompt('generate_card', props.input))} disabled={props.running}>
                 <Sparkles size={16} /> {t('templateGenerateCard')}
               </button>
-              <button onClick={() => runTask('generate_lorebook', buildManualTaskPrompt('generate_lorebook'))} disabled={props.running}>
+              <button onClick={() => runTask('generate_lorebook', buildGuidedTaskPrompt('generate_lorebook', props.input))} disabled={props.running}>
                 <BookOpen size={16} /> {t('templateGenerateLorebook')}
+              </button>
+              <button onClick={() => runTask('generate_mvu', buildGuidedTaskPrompt('generate_mvu', props.input))} disabled={props.running}>
+                <Database size={16} /> {t('templateGenerateMvu')}
               </button>
             </div>
             <label className="field">
@@ -1608,7 +1612,7 @@ function LLMPanel(props: {
           <article className="history-item" key={message.id}>
             <div className="history-meta"><strong>{message.template}</strong><span>{new Date(message.createdAt).toLocaleString()}</span></div>
             {message.userInput && <blockquote>{message.userInput}</blockquote>}
-            <RichResponse text={message.response} onApply={applyCodeBlock} onApplyField={props.fieldTarget ? applyFieldBlock : undefined} fieldLabel={props.fieldTarget?.label} />
+            <RichResponse text={message.response} onApply={(code) => applyCodeBlock(code, message.template)} onApplyField={props.fieldTarget ? applyFieldBlock : undefined} fieldLabel={props.fieldTarget?.label} />
           </article>
         ))}
       </div>
@@ -1844,7 +1848,16 @@ function buildManualTaskPrompt(template: string) {
   if (template === 'generate_lorebook') {
     return '請根據目前討論串、現有角色卡內容、創作偏好與 token 預算，生成可套用的 lorebook/character_book entries JSON。重點放在觸發鍵、世界資訊、秘密資訊與遊玩時機。';
   }
+  if (template === 'generate_mvu') {
+    return '請根據目前討論串、完整角色卡、Lorebook 與既有 MVU 設計，生成或調整可直接套用的 MVU 初始變數與變動規則。嚴格遵守 MagVarUpdate、型別契約、JSON Pointer 與 JSON Patch 規則。';
+  }
   return '';
+}
+
+function buildGuidedTaskPrompt(template: string, guidance: string) {
+  const base = buildManualTaskPrompt(template);
+  const trimmedGuidance = guidance.trim();
+  return trimmedGuidance ? `${base}\n\n使用者補充的生成方向：\n${trimmedGuidance}` : base;
 }
 
 function getErrorMessage(error: unknown) {
@@ -2173,6 +2186,108 @@ function applyCardPatch(project: CardProject, payload: any) {
     }
   }
   if (!applied) throw new Error('JSON does not contain supported card or lorebook fields.');
+}
+
+function applyTemplatePatch(project: CardProject, template: string, payload: any) {
+  if (template === 'generate_card') {
+    applyGeneratedCardPatch(project, payload);
+    return;
+  }
+  if (template === 'generate_lorebook') {
+    applyGeneratedLorebookPatch(project, payload);
+    return;
+  }
+  if (template === 'generate_mvu') {
+    applyGeneratedMvuPatch(project, payload);
+    return;
+  }
+  applyCardPatch(project, payload);
+}
+
+function applyGeneratedCardPatch(project: CardProject, payload: any) {
+  const source = payload.card ?? payload.character_card ?? payload;
+  const dataPatch = source.data ?? source;
+  const cardOnlyKeys = [
+    'name', 'description', 'personality', 'scenario', 'first_mes', 'mes_example',
+    'creator_notes', 'system_prompt', 'post_history_instructions', 'alternate_greetings',
+    'tags', 'creator', 'character_version',
+  ];
+  let applied = false;
+  for (const key of cardOnlyKeys) {
+    if (Object.prototype.hasOwnProperty.call(dataPatch, key)) {
+      (project.card.data as any)[key] = dataPatch[key];
+      applied = true;
+    }
+  }
+  if (!applied) throw new Error('Generated card JSON does not contain supported card fields.');
+}
+
+function applyGeneratedLorebookPatch(project: CardProject, payload: any) {
+  if (Array.isArray(payload)) {
+    project.lorebook.entries = mergeLorebookEntries(payload, project.lorebook.entries);
+    return;
+  }
+  const book = payload.lorebook ?? payload.character_book ?? payload;
+  if (!isStandaloneLorebook(book)) throw new Error('Generated lorebook JSON must contain an entries array.');
+  project.lorebook = normalizeLorebook(book, project.lorebook);
+}
+
+function applyGeneratedMvuPatch(project: CardProject, payload: any) {
+  const mvu = payload?.mvu ?? payload;
+  const initialValue = mvu?.initial_variables ?? mvu?.initialVariables ?? mvu?.stat_data ?? mvu?.initial;
+  const updateRules = mvu?.update_rules ?? mvu?.updateRules ?? mvu?.rules;
+  if (initialValue === undefined && typeof updateRules !== 'string') {
+    throw new Error('MVU JSON must contain initial_variables and/or update_rules.');
+  }
+
+  let initial = project.lorebook.entries.find(isMvuInitialEntry);
+  const wasConfigured = Boolean(initial);
+  if (!initial) {
+    initial = createMvuEntry(project.lorebook, 'initial');
+    project.lorebook.entries.push(initial);
+  }
+  if (initialValue !== undefined) {
+    const content = typeof initialValue === 'string' ? initialValue : JSON.stringify(initialValue, null, 2);
+    const parsed = parseMvuVariables(content);
+    if (!parsed.value) throw new Error(`Invalid MVU initial_variables: ${parsed.error}`);
+    initial.content = JSON.stringify(parsed.value, null, 2);
+  }
+  const active = Boolean(
+    (initial.extensions as any)?.st_card_writer?.active
+      ?? project.lorebook.entries.find(isMvuRulesEntry)?.enabled
+      ?? (wasConfigured ? initial.enabled : true),
+  );
+  initial.comment = MVU_INITIAL_COMMENT;
+  initial.enabled = false;
+  initial.constant = true;
+  initial.position = 'before_char';
+  initial.extensions = {
+    ...(initial.extensions ?? {}),
+    position: 0,
+    exclude_recursion: true,
+    st_card_writer: { kind: 'mvu_initial_variables', version: 2, active },
+  };
+
+  let rules = project.lorebook.entries.find(isMvuRulesEntry);
+  if (!rules) {
+    rules = createMvuEntry(project.lorebook, 'rules');
+    project.lorebook.entries.push(rules);
+  }
+  if (typeof updateRules === 'string') rules.content = updateRules;
+  if (!rules.content.includes('<JSONPatch>')) rules.content = buildMvuUpdatePrompt(rules.content);
+  rules.content = syncMvuTypeContract(rules.content, initial.content);
+  rules.comment = MVU_RULES_COMMENT;
+  rules.enabled = active;
+  rules.constant = true;
+  rules.position = 'after_char';
+  rules.extensions = {
+    ...(rules.extensions ?? {}),
+    position: 4,
+    role: 2,
+    exclude_recursion: true,
+    st_card_writer: { kind: 'mvu_update_rules', version: 2 },
+  };
+  setBundledMvuRuntime(project, active);
 }
 
 function isStandaloneLorebook(value: any) {

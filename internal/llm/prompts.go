@@ -353,13 +353,25 @@ func templateInstruction(template string) string {
 			"MODE: manual full-card generation.",
 			"Generate a SillyTavern V2 character card only because the user chose this template.",
 			"Output one valid JSON code block that can be applied to the current card.",
-			"Preserve useful existing fields and unknown extension-like information unless the user asks to replace them.",
+			"Do not output or modify character_book, lorebook entries, [initvar], [mvu_update], MVU runtime scripts, or card extensions.",
+			"Preserve useful existing card fields unless the user asks to replace them.",
 		}, "\n")
 	case "generate_lorebook":
 		return strings.Join([]string{
 			"MODE: manual lorebook generation.",
 			"Create lorebook entries with keys, content, trigger intent, and insertion purpose.",
+			"Do not output, replace, or modify [initvar], [mvu_update], MVU entries, or card fields.",
 			"Output applicable lorebook JSON in a fenced json code block.",
+		}, "\n")
+	case "generate_mvu":
+		return strings.Join([]string{
+			"MODE: direct MVU generation or adjustment.",
+			"Use the complete current card, lorebook, existing MVU entries, and prior discussion to design a coherent state model.",
+			"Return exactly one fenced valid JSON object with this shape: {\"mvu\":{\"initial_variables\":{...},\"update_rules\":\"...\"}}.",
+			"initial_variables must be a JSON object containing only stored stat_data values. Preserve useful existing paths unless the user's request requires changing them.",
+			"update_rules must contain the human policy plus the complete <status_current_variable> and <UpdateVariable>/<JSONPatch> protocol expected by MagVarUpdate.",
+			"Follow every MVU AUTHORING RULE below. Ensure every path referenced by update_rules exists in initial_variables and every operation preserves its declared type.",
+			"Do not output or modify ordinary lorebook entries, character-card fields, character_book metadata, or card extensions.",
 		}, "\n")
 	case "review":
 		return strings.Join([]string{

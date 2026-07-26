@@ -75,3 +75,26 @@ func TestQuickToolPromptsUseCurrentCardWithoutConversationInstructions(t *testin
 		t.Fatalf("cover prompt should include lorebook context")
 	}
 }
+
+func TestGenerateMVUPromptHasStrictSchemaAndCompleteContext(t *testing.T) {
+	project := model.NewProject("MVU generator")
+	project.Card.Data.Description = "A detective whose trust changes during play."
+	project.Lorebook.Entries = []model.LorebookEntry{
+		{ID: 1, Comment: "ordinary clue", Content: "The sealed archive contains the missing report.", Enabled: true},
+		{ID: 2, Comment: "[initvar] Initial Variables (keep disabled)", Content: `{"trust": 10}`, Constant: true},
+	}
+
+	prompt := BuildPrompt(TemplateRequest{Template: "generate_mvu", Locale: "en", Project: project})
+	for _, required := range []string{
+		"direct MVU generation or adjustment",
+		`{"mvu":{"initial_variables":{...},"update_rules":"..."}}`,
+		"complete <status_current_variable>",
+		"The sealed archive contains the missing report.",
+		`trust`,
+		"Do not output or modify ordinary lorebook entries",
+	} {
+		if !strings.Contains(prompt, required) {
+			t.Fatalf("generate_mvu prompt is missing %q", required)
+		}
+	}
+}
