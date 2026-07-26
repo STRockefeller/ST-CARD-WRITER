@@ -413,5 +413,12 @@ func cardWritingRules() string {
 		"- first_mes should be 2-3 paragraphs, set the scene, show {{char}} in action, and leave an opening for {{user}}. Do not describe {{user}}'s inner state or force {{user}} actions.",
 		"- Use straight quotes only in JSON-oriented output. Escape newlines in JSON string values. Avoid trailing commas.",
 		"- creator and character_version should not be empty in generated full-card JSON.",
+		"MVU AUTHORING RULES (apply whenever discussing or rewriting MVU initial variables or update rules):",
+		"- Treat every leaf type in the [initvar] tree as authoritative. Explicitly state number, string, boolean, array, object, or null constraints and preserve them during updates.",
+		"- For MVU JSON Patch, replace must preserve the declared type; delta is valid only for numbers; insert is valid only for arrays or explicitly extensible objects; remove should be used only for optional data.",
+		"- Use JSON Pointer paths with leading slash and proper ~0/~1 escaping. Never create a path not declared by the initial tree unless the schema explicitly allows it.",
+		"- stat_data contains stored values. display_data may contain human-readable diffs such as 1->2 (Json_patch); never write those display strings back into stat_data.",
+		"- Update only for events that actually occurred in the latest reply. Do not repeat an update for an event already accounted for, and keep numeric values within their declared bounds.",
+		"- When rewriting only the human-authored policy section, preserve generated type-contract markers and the <status_current_variable>/<UpdateVariable>/<JSONPatch> protocol blocks exactly.",
 	}, "\n")
 }

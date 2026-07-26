@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BookOpen, Brain, CheckCircle2, ChevronDown, Clipboard, Download, FileJson, Image, ImageUp, Languages, PanelLeftClose, PanelLeftOpen, Plus, Save, Settings, Sparkles, Trash2, UserRound, WandSparkles, X } from 'lucide-react';
+import { BookOpen, Brain, CheckCircle2, ChevronDown, Clipboard, Database, Download, FileJson, Image, ImageUp, Languages, PanelLeftClose, PanelLeftOpen, Plus, Save, Settings, Sparkles, Trash2, UserRound, WandSparkles, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { api } from './api';
 import type { AppSettings, CardProject, CharacterBook, CharacterCardV2, LorebookEntry } from './types';
@@ -444,6 +444,7 @@ export function App() {
               <Tab id="brainstorm" label={t('brainstorm')} icon={<Brain size={16} />} active={tab} onClick={setTab} />
               <Tab id="card" label={t('card')} icon={<Sparkles size={16} />} active={tab} onClick={setTab} />
               <Tab id="lorebook" label={t('lorebook')} icon={<BookOpen size={16} />} active={tab} onClick={setTab} />
+              <Tab id="mvu" label={t('mvuDesigner')} icon={<Database size={16} />} active={tab} onClick={setTab} />
               <Tab id="tokens" label={t('tokens')} icon={<CheckCircle2 size={16} />} active={tab} onClick={setTab} />
               <Tab id="review" label={t('review')} icon={<Languages size={16} />} active={tab} onClick={setTab} />
               <Tab id="settings" label={t('settings')} icon={<Settings size={16} />} active={tab} onClick={setTab} />
@@ -470,6 +471,7 @@ export function App() {
             )}
             {tab === 'card' && <CardEditor project={draft} updateDraft={updateDraft} startFieldAI={startFieldAI} />}
             {tab === 'lorebook' && <LorebookEditor project={draft} updateDraft={updateDraft} startFieldAI={startFieldAI} />}
+            {tab === 'mvu' && <MvuEditor project={draft} updateDraft={updateDraft} startFieldAI={startFieldAI} />}
             {tab === 'tokens' && <TokenPanel project={draft} tokenData={countDraftBudget(draft)} updateDraft={updateDraft} />}
             {tab === 'review' && (
               <LLMPanel
@@ -581,6 +583,7 @@ function buildExportCard(project: CardProject): CharacterCardV2 {
   } else {
     delete card.data.character_book;
   }
+  prepareMvuCardForExport(card);
   return card;
 }
 
@@ -823,6 +826,462 @@ function LorebookEditor({
       </div>
     </section>
   );
+}
+
+const MVU_INITIAL_COMMENT = '[initvar] Initial Variables (keep disabled)';
+const MVU_LEGACY_INITIAL_COMMENT = '[InitialVariables]';
+const MVU_RULES_COMMENT = '[mvu_update] Variable Update Rules';
+const MVU_RUNTIME_ID = '9d6f8c0a-5e21-4ab7-9f12-6c734ddf3e81';
+const MVU_LEGACY_RUNTIME_ID = 'st-card-writer-mvu-runtime';
+const MVU_RUNTIME_IMPORT = "import 'https://testingcf.jsdelivr.net/gh/MagicalAstrogy/MagVarUpdate@master/artifact/bundle.js';";
+
+function MvuEditor({
+  project,
+  updateDraft,
+  startFieldAI,
+}: {
+  project: CardProject;
+  updateDraft: (updater: (project: CardProject) => void) => void;
+  startFieldAI: (target: FieldTarget, value: unknown, mode: 'discuss' | 'revise') => void;
+}) {
+  const { t } = useTranslation();
+  const initialIndex = project.lorebook.entries.findIndex(isMvuInitialEntry);
+  const rulesIndex = project.lorebook.entries.findIndex(isMvuRulesEntry);
+  const initialEntry = project.lorebook.entries[initialIndex];
+  const rulesEntry = project.lorebook.entries[rulesIndex];
+  const enabled = Boolean(initialEntry && ((initialEntry.extensions as any)?.st_card_writer?.active ?? rulesEntry?.enabled ?? initialEntry.enabled));
+  const parsed = parseMvuVariables(initialEntry?.content ?? '{}');
+  const variables = parsed.value ? flattenMvuVariables(parsed.value) : [];
+
+  const updateEntry = (index: number, updater: (entry: LorebookEntry) => void) =>
+    updateDraft((draft) => updater(draft.lorebook.entries[index]));
+
+  const setEnabled = (nextEnabled: boolean) => updateDraft((draft) => {
+    let nextInitial = draft.lorebook.entries.find(isMvuInitialEntry);
+    if (!nextInitial) {
+      nextInitial = createMvuEntry(draft.lorebook, 'initial');
+      draft.lorebook.entries.push(nextInitial);
+    }
+    nextInitial.comment = MVU_INITIAL_COMMENT;
+    nextInitial.enabled = false;
+    nextInitial.constant = true;
+    nextInitial.position = 'before_char';
+    nextInitial.extensions = {
+      ...(nextInitial.extensions ?? {}),
+      position: 0,
+      exclude_recursion: true,
+      st_card_writer: { kind: 'mvu_initial_variables', version: 2, active: nextEnabled },
+    };
+
+    let nextRules = draft.lorebook.entries.find(isMvuRulesEntry);
+    if (!nextRules) {
+      nextRules = createMvuEntry(draft.lorebook, 'rules');
+      draft.lorebook.entries.push(nextRules);
+    }
+    nextRules.comment = MVU_RULES_COMMENT;
+    nextRules.enabled = nextEnabled;
+    nextRules.constant = true;
+    nextRules.position = 'after_char';
+    if (!nextRules.content.includes('<JSONPatch>')) nextRules.content = buildMvuUpdatePrompt(nextRules.content);
+    nextRules.content = syncMvuTypeContract(nextRules.content, nextInitial.content);
+    nextRules.extensions = {
+      ...(nextRules.extensions ?? {}),
+      position: 4,
+      role: 2,
+      exclude_recursion: true,
+      st_card_writer: { kind: 'mvu_update_rules', version: 2 },
+    };
+    setBundledMvuRuntime(draft, nextEnabled);
+  });
+
+  const writeVariables = (value: Record<string, unknown>) => updateDraft((draft) => {
+    const content = JSON.stringify(value, null, 2);
+    draft.lorebook.entries[initialIndex].content = content;
+    const nextRules = draft.lorebook.entries.find(isMvuRulesEntry);
+    if (nextRules) nextRules.content = syncMvuTypeContract(nextRules.content, content);
+  });
+
+  const changeVariable = (oldPath: string, nextPath: string, type: string, rawValue: string) => {
+    if (!parsed.value || !nextPath.trim()) return;
+    const next = structuredClone(parsed.value);
+    deleteMvuPath(next, oldPath);
+    setMvuPath(next, nextPath.trim(), parseMvuValue(type, rawValue));
+    writeVariables(next);
+  };
+
+  const removeVariable = (path: string) => {
+    if (!parsed.value) return;
+    const next = structuredClone(parsed.value);
+    deleteMvuPath(next, path);
+    writeVariables(next);
+  };
+
+  const addVariable = () => {
+    if (!parsed.value) return;
+    const next = structuredClone(parsed.value);
+    let suffix = 1;
+    let path = t('newVariablePath');
+    while (hasMvuPath(next, path)) path = `${t('newVariablePath')}_${suffix++}`;
+    setMvuPath(next, path, 0);
+    writeVariables(next);
+  };
+
+  return (
+    <section className="stack mvu-editor">
+      <section className="utility-panel">
+        <div>
+          <strong>{t('mvuDesigner')}</strong>
+          <span>{t('mvuDesignerHint')}</span>
+        </div>
+        <label className="checkline">
+          <input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />
+          {t('enableMvu')}
+        </label>
+      </section>
+
+      {!enabled ? (
+        <div className="empty-mvu"><p>{initialEntry ? t('mvuDisabledHint') : t('mvuNotConfigured')}</p></div>
+      ) : initialEntry && (
+        <>
+          <section className="entry">
+            <div className="entry-head">
+              <strong>{t('variableOverview')}</strong><span>{variables.length}</span>
+              <span className="field-ai-actions">
+                <button type="button" onClick={() => startFieldAI({ kind: 'loreEntry', index: initialIndex, key: 'content', label: 'MVU initial variables JSON' }, initialEntry.content, 'discuss')}>{t('aiDiscuss')}</button>
+                <button type="button" onClick={() => startFieldAI({ kind: 'loreEntry', index: initialIndex, key: 'content', label: 'MVU initial variables JSON' }, initialEntry.content, 'revise')}>{t('aiRevise')}</button>
+                <button className="primary" onClick={addVariable} disabled={!parsed.value}><Plus size={15} /> {t('addVariable')}</button>
+              </span>
+            </div>
+            <p className="hint">{t('variableTableHint')}</p>
+            {parsed.value ? (
+              <>
+              {variables.length === 0 ? <p className="hint">{t('noVariables')}</p> : (
+                <div className="variable-table-wrap">
+                  <table className="variable-table">
+                    <thead><tr><th>{t('variablePath')}</th><th>{t('variableType')}</th><th>{t('initialValue')}</th><th /></tr></thead>
+                    <tbody>{variables.map((variable) => (
+                      <MvuVariableRow key={`${variable.path}:${variable.type}:${variable.editValue}`} variable={variable} onChange={changeVariable} onRemove={removeVariable} />
+                    ))}</tbody>
+                  </table>
+                </div>
+              )}
+              </>
+            ) : <p className="validation-error">{parsed.error}</p>}
+          </section>
+
+          <details className="entry mvu-json-details">
+            <summary>{t('advancedJsonEditor')}</summary>
+            <div className="entry-head">
+              <span className="compat-badge">MagVarUpdate · [initvar]</span>
+              <button onClick={() => parsed.value && writeVariables(parsed.value)} disabled={!parsed.value}>{t('formatJson')}</button>
+            </div>
+            <p className="hint">{t('initialVariablesHint')}</p>
+            <textarea className={parsed.error ? 'json-editor invalid' : 'json-editor'} rows={16} value={initialEntry.content} spellCheck={false} onChange={(event) => updateEntry(initialIndex, (entry) => { entry.content = event.target.value; })} />
+            {parsed.error ? <p className="validation-error">{parsed.error}</p> : <p className="validation-ok">{t('validVariableTree', { count: variables.length })}</p>}
+          </details>
+
+          {rulesEntry && (
+            <section className="entry">
+              <div className="entry-head">
+                <strong>{t('variableUpdateRules')}</strong><span className="compat-badge">MagVarUpdate · JSON Patch</span>
+                <span className="field-ai-actions">
+                  <button type="button" onClick={() => startFieldAI({ kind: 'loreEntry', index: rulesIndex, key: 'content', label: 'MVU variable update rules' }, rulesEntry.content, 'discuss')}>{t('aiDiscuss')}</button>
+                  <button type="button" onClick={() => startFieldAI({ kind: 'loreEntry', index: rulesIndex, key: 'content', label: 'MVU variable update rules' }, rulesEntry.content, 'revise')}>{t('aiRevise')}</button>
+                </span>
+              </div>
+              <p className="hint">{t('variableUpdateRulesHint')}</p>
+              <textarea rows={14} value={rulesEntry.content} onChange={(event) => updateEntry(rulesIndex, (entry) => { entry.content = event.target.value; })} />
+            </section>
+          )}
+
+          <p className="mvu-requirements">{t('mvuRequirements')}</p>
+        </>
+      )}
+    </section>
+  );
+}
+
+function MvuVariableRow({
+  variable,
+  onChange,
+  onRemove,
+}: {
+  variable: { path: string; type: string; preview: string; editValue: string };
+  onChange: (oldPath: string, nextPath: string, type: string, rawValue: string) => void;
+  onRemove: (path: string) => void;
+}) {
+  const { t } = useTranslation();
+  const [path, setPath] = useState(variable.path);
+  const [type, setType] = useState(variable.type);
+  const [value, setValue] = useState(variable.editValue);
+  const commit = (nextType = type, nextValue = value) => onChange(variable.path, path, nextType, nextValue);
+  return (
+    <tr>
+      <td><input aria-label={t('variablePath')} value={path} onChange={(event) => setPath(event.target.value)} onBlur={() => commit()} /></td>
+      <td>
+        <select aria-label={t('variableType')} value={type} onChange={(event) => { const next = event.target.value; setType(next); commit(next); }}>
+          <option value="number">{t('typeNumber')}</option>
+          <option value="string">{t('typeString')}</option>
+          <option value="boolean">{t('typeBoolean')}</option>
+          <option value="array">{t('typeArray')}</option>
+          <option value="null">null</option>
+          <option value="object">object</option>
+        </select>
+      </td>
+      <td>{type === 'boolean' ? (
+        <select aria-label={t('initialValue')} value={value} onChange={(event) => { setValue(event.target.value); commit(type, event.target.value); }}><option value="true">true</option><option value="false">false</option></select>
+      ) : type === 'null' ? <code>null</code> : (
+        <input aria-label={t('initialValue')} type={type === 'number' ? 'number' : 'text'} value={value} onChange={(event) => setValue(event.target.value)} onBlur={() => commit()} />
+      )}</td>
+      <td><button className="danger icon-button" aria-label={t('deleteEntry')} onClick={() => onRemove(variable.path)}><Trash2 size={15} /></button></td>
+    </tr>
+  );
+}
+
+function isMvuInitialEntry(entry: LorebookEntry) {
+  const comment = entry.comment.trim().toLowerCase();
+  return comment.includes('[initvar]')
+    || comment === MVU_LEGACY_INITIAL_COMMENT.toLowerCase()
+    || (entry.extensions as any)?.st_card_writer?.kind === 'mvu_initial_variables';
+}
+
+function isManagedMvuInitialEntry(entry: LorebookEntry) {
+  const comment = entry.comment.trim().toLowerCase();
+  return comment === MVU_INITIAL_COMMENT.toLowerCase()
+    || comment === MVU_LEGACY_INITIAL_COMMENT.toLowerCase()
+    || (entry.extensions as any)?.st_card_writer?.kind === 'mvu_initial_variables';
+}
+
+function isMvuRulesEntry(entry: LorebookEntry) {
+  return entry.comment.trim().toLowerCase() === MVU_RULES_COMMENT.toLowerCase()
+    || (entry.extensions as any)?.st_card_writer?.kind === 'mvu_update_rules';
+}
+
+function createMvuEntry(book: CharacterBook, kind: 'initial' | 'rules'): LorebookEntry {
+  const nextId = Math.max(0, ...book.entries.map((entry) => entry.id)) + 1;
+  const initial = kind === 'initial';
+  return {
+    id: nextId,
+    keys: [],
+    secondary_keys: [],
+    content: initial ? '{\n  "角色": {\n    "好感度": 0\n  },\n  "世界": {\n    "回合": 0\n  }\n}' : buildMvuUpdatePrompt(''),
+    enabled: !initial,
+    insertion_order: initial ? 0 : 1,
+    case_sensitive: false,
+    selective: false,
+    constant: true,
+    position: initial ? 'before_char' : 'after_char',
+    priority: initial ? 1000 : 999,
+    comment: initial ? MVU_INITIAL_COMMENT : MVU_RULES_COMMENT,
+    extensions: initial
+      ? { position: 0, exclude_recursion: true, st_card_writer: { kind: 'mvu_initial_variables', version: 2, active: true } }
+      : { position: 4, role: 2, exclude_recursion: true, st_card_writer: { kind: 'mvu_update_rules', version: 2 } },
+  };
+}
+
+function buildMvuUpdatePrompt(existingRules: string) {
+  const preservedRules = existingRules.split('<UpdateVariable>')[0].trim();
+  const policies = preservedRules || 'Update only variables affected by events that actually occurred. Keep value types stable and do not invent undeclared paths.';
+  return [
+    '<status_current_variable>',
+    '{{format_message_variable::stat_data}}',
+    '</status_current_variable>',
+    '',
+    'Variable-specific update policies:',
+    policies,
+    '',
+    'At the end of every reply, output update analysis and commands together.',
+    'Use a valid JSON Patch array. Supported operations are replace, delta, insert, and remove.',
+    'The initial-variable type contract is authoritative. replace must keep the declared type; delta is allowed only for numbers; insert is allowed only for arrays or extensible objects.',
+    'Never write display_data strings such as "1->2 (Json_patch)" back into stat_data. Never create an undeclared path.',
+    'Use JSON Pointer paths beginning with /. Output an empty array when nothing changed.',
+    '<UpdateVariable>',
+    '<Analysis>Briefly identify only the variables that changed and why.</Analysis>',
+    '<JSONPatch>',
+    '[',
+    '  { "op": "replace", "path": "/角色/好感度", "value": 1 }',
+    ']',
+    '</JSONPatch>',
+    '</UpdateVariable>',
+  ].join('\n');
+}
+
+const MVU_TYPE_CONTRACT_START = '<!-- ST_CARD_WRITER_MVU_TYPES_START -->';
+const MVU_TYPE_CONTRACT_END = '<!-- ST_CARD_WRITER_MVU_TYPES_END -->';
+
+function syncMvuTypeContract(prompt: string, initialContent: string) {
+  const parsed = parseMvuVariables(initialContent);
+  if (!parsed.value) return prompt;
+  const rows = flattenMvuVariables(parsed.value);
+  const contract = [
+    MVU_TYPE_CONTRACT_START,
+    'Authoritative variable type contract (generated from [initvar]; do not change these types):',
+    ...rows.map((row) => {
+      const pointer = `/${mvuPathParts(row.path).map((part) => part.replace(/~/g, '~0').replace(/\//g, '~1')).join('/')}`;
+      const operations = row.type === 'number' ? 'replace, delta' : row.type === 'array' ? 'replace, insert, remove' : 'replace';
+      return `- ${pointer}: type=${row.type}; initial=${row.preview}; allowed_ops=${operations}`;
+    }),
+    'Validation rules:',
+    '- A patch value must have exactly the declared type. Do not stringify numbers or booleans.',
+    '- delta is numeric arithmetic, never string concatenation.',
+    '- Do not copy display_data diff text into stat_data.',
+    '- Do not update or create paths absent from this contract.',
+    MVU_TYPE_CONTRACT_END,
+  ].join('\n');
+  const withoutOldContract = prompt.replace(new RegExp(`${MVU_TYPE_CONTRACT_START}[\\s\\S]*?${MVU_TYPE_CONTRACT_END}\\n*`, 'g'), '');
+  const marker = '</status_current_variable>';
+  return withoutOldContract.includes(marker)
+    ? withoutOldContract.replace(marker, `${marker}\n\n${contract}`)
+    : `${contract}\n\n${withoutOldContract}`;
+}
+
+function setBundledMvuRuntime(project: CardProject, enabled: boolean) {
+  setBundledMvuRuntimeOnData(project.card.data, enabled);
+}
+
+function setBundledMvuRuntimeOnData(data: CharacterCardV2['data'], enabled: boolean) {
+  const extensions = (data.extensions ??= {});
+  const tavernHelper = ((extensions as any).tavern_helper ??= {});
+  const scripts = Array.isArray(tavernHelper.scripts) ? tavernHelper.scripts : (tavernHelper.scripts = []);
+  let runtime = scripts.find((script: any) => script?.id === MVU_RUNTIME_ID || script?.id === MVU_LEGACY_RUNTIME_ID);
+  if (!runtime && scripts.some((script: any) => typeof script?.content === 'string' && script.content.includes('MagicalAstrogy/MagVarUpdate'))) return;
+  if (!runtime) {
+    runtime = {
+      type: 'script',
+      enabled,
+      name: 'MVU',
+      id: MVU_RUNTIME_ID,
+      content: MVU_RUNTIME_IMPORT,
+      info: 'Bundled by SillyTavern Card Writer',
+      button: { enabled: true, buttons: [] },
+      data: {},
+      export_with: { data: true, button: true },
+    };
+    scripts.push(runtime);
+  } else {
+    runtime.id = MVU_RUNTIME_ID;
+    runtime.name = 'MVU';
+    runtime.enabled = enabled;
+    runtime.content = MVU_RUNTIME_IMPORT;
+    runtime.button = { ...(runtime.button ?? {}), enabled: true, buttons: Array.isArray(runtime.button?.buttons) ? runtime.button.buttons : [] };
+    runtime.export_with = { data: true, button: true };
+  }
+}
+
+function prepareMvuCardForExport(card: CharacterCardV2) {
+  const book = card.data.character_book;
+  if (!book) return;
+  const initial = book.entries.find(isManagedMvuInitialEntry);
+  if (!initial) return;
+  let rules = book.entries.find(isMvuRulesEntry);
+  const active = Boolean((initial.extensions as any)?.st_card_writer?.active ?? rules?.enabled ?? initial.enabled);
+  initial.comment = MVU_INITIAL_COMMENT;
+  initial.enabled = false;
+  initial.constant = true;
+  initial.position = 'before_char';
+  initial.extensions = {
+    ...(initial.extensions ?? {}),
+    position: 0,
+    exclude_recursion: true,
+    st_card_writer: { kind: 'mvu_initial_variables', version: 2, active },
+  };
+  if (!rules) {
+    rules = createMvuEntry(book, 'rules');
+    book.entries.push(rules);
+  }
+  rules.comment = MVU_RULES_COMMENT;
+  rules.enabled = active;
+  rules.constant = true;
+  rules.position = 'after_char';
+  if (!rules.content.includes('<JSONPatch>')) rules.content = buildMvuUpdatePrompt(rules.content);
+  rules.content = syncMvuTypeContract(rules.content, initial.content);
+  rules.extensions = {
+    ...(rules.extensions ?? {}),
+    position: 4,
+    role: 2,
+    exclude_recursion: true,
+    st_card_writer: { kind: 'mvu_update_rules', version: 2 },
+  };
+  setBundledMvuRuntimeOnData(card.data, active);
+}
+
+function parseMvuVariables(content: string): { value?: Record<string, unknown>; error?: string } {
+  try {
+    const value = JSON.parse(content);
+    if (!value || Array.isArray(value) || typeof value !== 'object') return { error: 'Initial variables must be a JSON object.' };
+    return { value };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : 'Invalid JSON.' };
+  }
+}
+
+function flattenMvuVariables(value: Record<string, unknown>) {
+  const rows: Array<{ path: string; type: string; preview: string; editValue: string }> = [];
+  const visit = (current: unknown, path: string) => {
+    if (current && typeof current === 'object' && !Array.isArray(current)) {
+      const entries = Object.entries(current as Record<string, unknown>);
+      if (entries.length === 0 && path) rows.push({ path, type: 'object', preview: '{}', editValue: '{}' });
+      entries.forEach(([key, child]) => visit(child, path ? `${path}.${key}` : key));
+      return;
+    }
+    const type = Array.isArray(current) ? 'array' : current === null ? 'null' : typeof current;
+    const serialized = JSON.stringify(current);
+    const editValue = type === 'string' ? String(current) : serialized ?? String(current);
+    rows.push({ path, type, editValue, preview: serialized && serialized.length > 80 ? `${serialized.slice(0, 77)}...` : serialized ?? String(current) });
+  };
+  visit(value, '');
+  return rows;
+}
+
+function parseMvuValue(type: string, rawValue: string): unknown {
+  if (type === 'number') return Number.isFinite(Number(rawValue)) ? Number(rawValue) : 0;
+  if (type === 'boolean') return rawValue === 'true';
+  if (type === 'null') return null;
+  if (type === 'array') {
+    try { const parsed = JSON.parse(rawValue); return Array.isArray(parsed) ? parsed : []; } catch { return []; }
+  }
+  if (type === 'object') {
+    try { const parsed = JSON.parse(rawValue); return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}; } catch { return {}; }
+  }
+  return rawValue;
+}
+
+function mvuPathParts(path: string) {
+  return path.split('.').map((part) => part.trim()).filter(Boolean);
+}
+
+function setMvuPath(root: Record<string, unknown>, path: string, value: unknown) {
+  const parts = mvuPathParts(path);
+  if (!parts.length) return;
+  let current = root;
+  parts.slice(0, -1).forEach((part) => {
+    if (!current[part] || typeof current[part] !== 'object' || Array.isArray(current[part])) current[part] = {};
+    current = current[part] as Record<string, unknown>;
+  });
+  current[parts[parts.length - 1]] = value;
+}
+
+function deleteMvuPath(root: Record<string, unknown>, path: string) {
+  const parts = mvuPathParts(path);
+  const walk = (current: Record<string, unknown>, depth: number): boolean => {
+    const key = parts[depth];
+    if (!key) return false;
+    if (depth === parts.length - 1) delete current[key];
+    else if (current[key] && typeof current[key] === 'object' && !Array.isArray(current[key])) {
+      if (walk(current[key] as Record<string, unknown>, depth + 1)) delete current[key];
+    }
+    return Object.keys(current).length === 0;
+  };
+  walk(root, 0);
+}
+
+function hasMvuPath(root: Record<string, unknown>, path: string) {
+  let current: unknown = root;
+  for (const part of mvuPathParts(path)) {
+    if (!current || typeof current !== 'object' || !(part in current)) return false;
+    current = (current as Record<string, unknown>)[part];
+  }
+  return true;
 }
 
 function LoreEntry({

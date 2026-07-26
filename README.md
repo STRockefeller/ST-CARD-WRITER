@@ -20,6 +20,7 @@ A local-first web app for creating, editing, reviewing, translating, and exporti
 - Generate a concise `{{user}}` persona and natural-language/booru cover prompts.
 - Keep snapshots before AI-applied changes and restore or compare previous versions.
 - Preserve unknown extension data where possible.
+- Optionally design MVU initial variables and `_.set` update rules as portable embedded lorebook entries.
 
 ## Local-First Design
 
@@ -117,6 +118,15 @@ The model ID must be valid for the selected provider. The app does not create or
 7. Save the project, then export JSON or PNG.
 
 AI output is never assumed to be correct. The **Apply to card** action is shown only for JSON-like code blocks, and a snapshot is created before applicable content is applied.
+
+## MVU variable design
+
+The optional **MVU Variables** tab creates two ordinary, editable lorebook entries:
+
+- `[initvar] Initial Variables (keep disabled)`: a JSON object loaded into MVU `stat_data`. MVU identifies this entry by its comment even though the lorebook entry is disabled.
+- `[mvu_update] Variable Update Rules`: persistent instructions that ask the model to emit MagVarUpdate-compatible JSON Patch updates.
+
+The editor provides a beginner-friendly variable table for paths, types, initial values, adding, and deletion, while retaining a collapsible raw JSON editor for advanced structures. Both the variable tree and update rules support the existing AI discuss/revise workflow. It validates the initial JSON and preserves both entries when MVU is disabled. Export safely merges a Tavern Helper script that loads the official MagVarUpdate runtime; existing card scripts are preserved. Custom status-bar UI is intentionally outside this initial implementation.
 
 ## Import and Export
 

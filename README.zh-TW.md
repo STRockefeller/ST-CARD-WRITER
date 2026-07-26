@@ -118,6 +118,15 @@ npm run dev
 
 AI 輸出不應被視為必然正確。「套用到卡片」只會出現在 JSON-like 程式碼區塊，套用前會建立版本快照。
 
+## MVU 變數設計
+
+可選的 **MVU 變數** 分頁會建立兩個仍可在 Lorebook 編輯器中直接修改的普通條目：
+
+- `[initvar] Initial Variables (keep disabled)`：載入至 MVU `stat_data` 的 JSON 物件。條目本身刻意停用，MVU 仍會依名稱標記讀取。
+- `[mvu_update] Variable Update Rules`：要求模型輸出 MagVarUpdate 相容 JSON Patch 的常駐更新規則。
+
+編輯器提供適合新手的變數表格，可新增、刪除、修改路徑、型別與初始值；複雜結構仍可使用折疊的 JSON 進階編輯器。變數樹與更新規則都支援既有的 AI 討論／修改流程。編輯器會驗證初始 JSON；停用 MVU 時只會收起並停用條目，不會刪除內容。匯出時會安全合併載入官方 MagVarUpdate runtime 的酒館助手腳本，不覆蓋卡片原有腳本。第一版刻意不包含自訂狀態列 UI。
+
 ## 匯入與匯出格式
 
 ### 匯入

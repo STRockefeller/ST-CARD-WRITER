@@ -1026,6 +1026,80 @@ button:disabled {
   font-size: 13px;
 }
 
+.mvu-editor .utility-panel { align-items: center; }
+
+.empty-mvu {
+  padding: 28px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 12px;
+  text-align: center;
+}
+
+.compat-badge {
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--brand-soft);
+  color: var(--brand);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.json-editor {
+  width: 100%;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.json-editor.invalid { border-color: #b42318; }
+
+.validation-error,
+.validation-ok,
+.mvu-requirements {
+  margin: 8px 0 0;
+  font-size: 13px;
+}
+
+.validation-error { color: #b42318; }
+.validation-ok { color: #287454; }
+.mvu-requirements { color: var(--muted); }
+.variable-table-wrap { overflow-x: auto; }
+
+.variable-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.variable-table th,
+.variable-table td {
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.variable-table th {
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.variable-table input,
+.variable-table select {
+  width: 100%;
+  min-width: 110px;
+}
+
+.variable-table td:first-child input { min-width: 220px; }
+.variable-table td:nth-child(2) { width: 150px; }
+.variable-table td:last-child { width: 48px; }
+
+.mvu-json-details > summary {
+  cursor: pointer;
+  color: var(--brand);
+  font-weight: 700;
+}
+
+.mvu-json-details[open] > summary { margin-bottom: 14px; }
+
 .settings-panel {
   max-width: 720px;
 }

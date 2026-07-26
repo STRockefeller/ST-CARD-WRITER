@@ -12,7 +12,7 @@
     "dev:server": "set GOCACHE=%CD%\\.cache\\go-build&& go run ./cmd/server",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
-    "test": "node test/translation-protection.test.mjs"
+    "test": "node test/translation-protection.test.mjs && node test/mvu-export.test.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "4.36.1",
